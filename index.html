@@ -42,17 +42,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   
   <style>
-    /* Base styles */
-    * { box-sizing: border-box; }
-    html, body { 
-      margin: 0; 
-      padding: 0; 
-      height: 100%; 
-      overflow: hidden;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
-    
-    /* SN theme variable fallbacks */
+    /* SN theme CSS variables */
     :root {
       --sn-stylekit-background-color: #ffffff;
       --sn-stylekit-foreground-color: #1a1a1a;
@@ -61,7 +51,6 @@
       --sn-stylekit-accent-color: #3b82f6;
       --sn-stylekit-contrast-background-color: #f3f4f6;
     }
-    
     .dark {
       --sn-stylekit-background-color: #1a1a1a;
       --sn-stylekit-foreground-color: #f5f5f5;
@@ -69,6 +58,16 @@
       --sn-stylekit-info-color: #60a5fa;
       --sn-stylekit-accent-color: #60a5fa;
       --sn-stylekit-contrast-background-color: #262626;
+    }
+    
+    /* Base styles */
+    * { box-sizing: border-box; }
+    html, body { 
+      margin: 0; 
+      padding: 0; 
+      height: 100%; 
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
     
     /* Scrollbar styling */
@@ -105,6 +104,357 @@
       filter: invert(1);
     }
   </style>
+  
+  <script>
+    // =====================================================
+    // SN EXTENSION API - Extracted from sn-extension-api@0.4.0
+    // This is the PROVEN working implementation
+    // =====================================================
+    (function() {
+      var Actions = {
+        StreamContextItem: "stream-context-item",
+        SaveItems: "save-items",
+        ComponentRegistered: "component-registered",
+        ActivateThemes: "themes",
+        ThemesActivated: "themes-activated",
+        SetComponentData: "set-component-data"
+      };
+      
+      var ApiType = {
+        Component: "component"
+      };
+      
+      var snApi = {
+        component: { activeThemes: [], acceptsThemes: true },
+        sentMessages: [],
+        messageQueue: [],
+        subscriptions: [],
+        generateNotePreview: true,
+        contentWindow: null,
+        lastStreamedItem: null,
+        coallesedSavingDelay: 250,
+        pendingSaveTimeout: null,
+        pendingSaveParams: null,
+        pendingSaveItems: null,
+        
+        initialize: function(options) {
+          options = options || {};
+          if (this.contentWindow) {
+            throw "Cannot initialize mediator more than once";
+          }
+          this.contentWindow = window;
+          this.coallesedSavingDelay = options.debounceSave !== undefined ? options.debounceSave : 250;
+          this.registerMessageHandler();
+          
+          var self = this;
+          this.postMessage(Actions.StreamContextItem, {}, function(response) {
+            var item = response.item;
+            if ((!self.lastStreamedItem || self.lastStreamedItem.uuid !== item.uuid) && self.pendingSaveTimeout) {
+              clearTimeout(self.pendingSaveTimeout);
+              self.performSavingOfItems(self.pendingSaveParams);
+              self.pendingSaveTimeout = undefined;
+              self.pendingSaveParams = undefined;
+            }
+            self.lastStreamedItem = item;
+            if (!self.lastStreamedItem.isMetadataUpdate) {
+              self.subscriptions.forEach(function(cb) {
+                cb(self.text, self.meta);
+              });
+            }
+          });
+        },
+        
+        subscribe: function(callback) {
+          this.subscriptions.push(callback);
+          var self = this;
+          if (this.lastStreamedItem) {
+            setTimeout(function() {
+              callback(self.text, self.meta);
+            });
+          }
+          return function() {
+            var idx = self.subscriptions.indexOf(callback);
+            if (idx >= 0) self.subscriptions.splice(idx, 1);
+          };
+        },
+        
+        get text() {
+          this.checkNoteExists();
+          var item = this.lastStreamedItem;
+          return (item && item.content && item.content.text) || "";
+        },
+        
+        set text(value) {
+          this.checkNoteExists();
+          this.lastStreamedItem.content.text = value;
+          this.saveNote(this.lastStreamedItem);
+        },
+        
+        get meta() {
+          this.checkNoteExists();
+          var item = this.lastStreamedItem;
+          if (item && item.content) {
+            return item.content.appData[item.content.editorIdentifier] || {};
+          }
+          return {};
+        },
+        
+        set meta(value) {
+          this.checkNoteExists();
+          this.lastStreamedItem.content.appData[this.lastStreamedItem.content.editorIdentifier] = value;
+          this.saveNote(this.lastStreamedItem);
+        },
+        
+        get locked() {
+          this.checkNoteExists();
+          var item = this.lastStreamedItem;
+          return item && item.content && item.content.appData && 
+                 item.content.appData["org.standardnotes.sn"] &&
+                 item.content.appData["org.standardnotes.sn"].locked;
+        },
+        
+        get preview() {
+          this.checkNoteExists();
+          var item = this.lastStreamedItem;
+          return item && item.content && item.content.preview_plain;
+        },
+        
+        set preview(value) {
+          this.checkNoteExists();
+          this.generateNotePreview = false;
+          this.lastStreamedItem.content.preview_plain = value;
+        },
+        
+        get isRunningInDesktopApplication() {
+          return this.component.environment === "desktop";
+        },
+        
+        get isRunningInMobileApplication() {
+          return this.component.environment === "mobile";
+        },
+        
+        get isRunningInBrowser() {
+          return this.component.environment === "web";
+        },
+        
+        registerMessageHandler: function() {
+          var self = this;
+          
+          function isJsonString(str) {
+            if (typeof str !== "string") return false;
+            try {
+              var result = JSON.parse(str);
+              var type = Object.prototype.toString.call(result);
+              return type === "[object Object]" || type === "[object Array]";
+            } catch (e) {
+              return false;
+            }
+          }
+          
+          this.messageHandler = function(event) {
+            var data = event.data;
+            var parsed = isJsonString(data) ? JSON.parse(data) : data;
+            if (parsed) {
+              self.handleMessage(parsed);
+            }
+          };
+          
+          // Listen on both document and window - this is key for mobile compatibility
+          this.contentWindow.document.addEventListener("message", this.messageHandler, false);
+          this.contentWindow.addEventListener("message", this.messageHandler, false);
+        },
+        
+        handleMessage: function(message) {
+          var self = this;
+          
+          switch (message.action) {
+            case Actions.ComponentRegistered:
+              this.component.sessionKey = message.sessionKey;
+              if (message.componentData) {
+                this.component.data = message.componentData;
+              }
+              this.onReady(message.data);
+              break;
+              
+            case Actions.ActivateThemes:
+              this.activateThemes(message.data.themes);
+              break;
+              
+            default:
+              if (!message.original) return;
+              var sent = this.sentMessages.filter(function(m) {
+                return m.messageId === message.original.messageId;
+              })[0];
+              if (sent && sent.callback) {
+                sent.callback(message.data);
+              }
+              break;
+          }
+        },
+        
+        onReady: function(data) {
+          this.component.environment = data.environment;
+          this.component.platform = data.platform;
+          this.component.uuid = data.uuid;
+          
+          // Process queued messages
+          var self = this;
+          this.messageQueue.forEach(function(queued) {
+            self.postMessage(queued.action, queued.data, queued.callback);
+          });
+          this.messageQueue = [];
+          
+          this.activateThemes(data.activeThemeUrls || []);
+          this.postMessage(Actions.ThemesActivated, {});
+        },
+        
+        postMessage: function(action, data, callback) {
+          // Queue if not yet registered
+          if (!this.component.sessionKey) {
+            this.messageQueue.push({
+              action: action,
+              data: data,
+              api: ApiType.Component,
+              callback: callback
+            });
+            return;
+          }
+          
+          var message = {
+            action: action,
+            data: data,
+            messageId: this.generateUUID(),
+            sessionKey: this.component.sessionKey,
+            api: ApiType.Component
+          };
+          
+          var messageCopy = JSON.parse(JSON.stringify(message));
+          messageCopy.callback = callback;
+          this.sentMessages.push(messageCopy);
+          
+          // KEY DIFFERENCE: Stringify for mobile, object for desktop
+          var toSend = this.isRunningInMobileApplication ? JSON.stringify(message) : message;
+          
+          // ONLY use parent.postMessage - no ReactNativeWebView
+          this.contentWindow.parent.postMessage(toSend, "*");
+        },
+        
+        activateThemes: function(urls) {
+          urls = urls || [];
+          if (!this.component.acceptsThemes) return;
+          
+          var activeThemes = this.component.activeThemes || [];
+          if (activeThemes.sort().toString() === urls.sort().toString()) return;
+          
+          var toActivate = urls.slice();
+          var toDeactivate = [];
+          
+          activeThemes.forEach(function(theme) {
+            if (urls.includes(theme)) {
+              toActivate = toActivate.filter(function(u) { return u !== theme; });
+            } else {
+              toDeactivate.push(theme);
+            }
+          });
+          
+          var self = this;
+          toDeactivate.forEach(function(theme) {
+            self.deactivateTheme(theme);
+          });
+          
+          this.component.activeThemes = urls;
+          
+          toActivate.forEach(function(url) {
+            if (!url) return;
+            var link = self.contentWindow.document.createElement("link");
+            link.id = btoa(url);
+            link.href = url;
+            link.type = "text/css";
+            link.rel = "stylesheet";
+            link.media = "screen,print";
+            link.className = "custom-theme";
+            self.contentWindow.document.getElementsByTagName("head")[0].appendChild(link);
+          });
+        },
+        
+        deactivateTheme: function(url) {
+          var elements = this.contentWindow.document.getElementsByClassName("custom-theme");
+          var el = Array.from(elements).find(function(e) { return e.id === btoa(url); });
+          if (el && el.parentNode) {
+            el.setAttribute("disabled", "true");
+            el.parentNode.removeChild(el);
+          }
+        },
+        
+        generateUUID: function() {
+          if (crypto.randomUUID) return crypto.randomUUID();
+          return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0;
+            return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+          });
+        },
+        
+        performSavingOfItems: function(params) {
+          var items = params.items;
+          var callback = params.callback;
+          
+          if (this.generateNotePreview) {
+            var text = items[0].content.text || "";
+            items[0].content.preview_plain = text.length <= 50 ? text : text.substring(0, 50) + "...";
+          }
+          
+          var self = this;
+          var itemsToSave = items.map(function(item) {
+            return self.jsonObjectForItem(item);
+          });
+          
+          this.postMessage(Actions.SaveItems, { items: itemsToSave }, function() {
+            if (callback) callback();
+          });
+        },
+        
+        saveNote: function(item, callback) {
+          var items = [item];
+          if (!this.pendingSaveItems) this.pendingSaveItems = [];
+          
+          if (this.coallesedSavingDelay) {
+            if (this.pendingSaveTimeout) clearTimeout(this.pendingSaveTimeout);
+            
+            var uuids = items.map(function(i) { return i.uuid; });
+            var existing = this.pendingSaveItems.filter(function(i) { return !uuids.includes(i.uuid); });
+            this.pendingSaveItems = existing.concat(items);
+            this.pendingSaveParams = { items: this.pendingSaveItems, callback: callback };
+            
+            var self = this;
+            this.pendingSaveTimeout = setTimeout(function() {
+              self.performSavingOfItems(self.pendingSaveParams);
+              self.pendingSaveItems = [];
+              self.pendingSaveTimeout = undefined;
+              self.pendingSaveParams = null;
+            }, this.coallesedSavingDelay);
+          } else {
+            this.performSavingOfItems({ items: items, callback: callback });
+          }
+        },
+        
+        jsonObjectForItem: function(item) {
+          var copy = Object.assign({}, item);
+          copy.children = null;
+          copy.parent = null;
+          return copy;
+        },
+        
+        checkNoteExists: function() {
+          if (!this.lastStreamedItem) {
+            throw "Trying to interact with note before it is received from Standard Notes. Use subscribe function.";
+          }
+        }
+      };
+      
+      // Expose globally
+      window.snApi = snApi;
+    })();
+  </script>
 </head>
 <body>
   <div id="app" x-data="productivityApp()" x-init="init()" 
@@ -118,12 +468,9 @@
         <div class="flex items-center gap-3">
           <h1 class="text-lg font-semibold">Tasks</h1>
           <span class="text-sm opacity-60" x-text="progressText"></span>
-          <!-- Sync indicator -->
           <span x-show="inStandardNotes" class="w-2 h-2 rounded-full bg-green-500" title="Synced with Standard Notes"></span>
-          <span x-show="!inStandardNotes && connectionAttempts > 0" class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" title="Connecting..."></span>
         </div>
         <div class="flex items-center gap-2">
-          <!-- View toggle -->
           <div class="flex rounded-lg overflow-hidden border" style="border-color: var(--sn-stylekit-border-color);">
             <button @click.prevent="viewMode = 'list'" 
                     class="px-3 py-2 text-sm min-h-[44px] transition-colors"
@@ -137,7 +484,6 @@
             </button>
           </div>
           
-          <!-- Sort toggle (list view only) -->
           <button x-show="viewMode === 'list'" @click.prevent="toggleSort()" 
                   class="p-2 rounded-lg hover:opacity-80 transition-opacity min-w-[44px] min-h-[44px] flex items-center justify-center"
                   :title="sortBy === 'weight' ? 'Sort by due date' : 'Sort by weight'"
@@ -150,7 +496,6 @@
             </svg>
           </button>
           
-          <!-- Dark mode toggle (standalone only) -->
           <button x-show="!inStandardNotes" @click.prevent="toggleDarkMode()" 
                   class="p-2 rounded-lg hover:opacity-80 transition-opacity min-w-[44px] min-h-[44px] flex items-center justify-center"
                   style="background: var(--sn-stylekit-contrast-background-color);">
@@ -162,7 +507,6 @@
             </svg>
           </button>
           
-          <!-- Clear completed -->
           <button x-show="completedCount > 0" @click.prevent="clearCompleted()" 
                   class="px-3 py-2 text-sm rounded-lg hover:opacity-80 transition-opacity min-h-[44px]"
                   style="background: var(--sn-stylekit-contrast-background-color);">
@@ -174,7 +518,6 @@
     
     <!-- Task list view -->
     <main x-show="viewMode === 'list'" class="flex-1 overflow-y-auto custom-scroll px-4 py-3">
-      <!-- Add task input -->
       <div class="mb-4" x-show="!locked">
         <div class="flex gap-2">
           <input type="text" 
@@ -193,154 +536,60 @@
         </div>
       </div>
       
-      <!-- Locked indicator -->
-      <div x-show="locked" class="mb-4 px-4 py-3 rounded-lg text-sm opacity-70"
-           style="background: var(--sn-stylekit-contrast-background-color);">
-        🔒 This note is locked. Unlock to edit.
-      </div>
-      
-      <!-- Connection status (show if in iframe but not connected after retries) -->
-      <div x-show="!inStandardNotes && connectionAttempts >= 5" class="mb-4 px-4 py-3 rounded-lg text-sm"
-           style="background: #fef3c7; color: #92400e;">
-        <div class="flex items-start justify-between gap-2">
-          <span>⚠️ Not syncing with Standard Notes. Changes saved locally only.</span>
-          <button @click.prevent="showDebugInfo()" 
-                  class="text-xs underline whitespace-nowrap"
-                  title="Show diagnostic info">
-            Debug
-          </button>
-        </div>
-        <div x-show="debugInfoVisible" class="mt-2 text-xs font-mono" style="background: rgba(0,0,0,0.1); padding: 8px; border-radius: 4px; max-height: 300px; overflow-y: auto;">
-          <div>Attempts: <span x-text="connectionAttempts"></span></div>
-          <div>In iframe: <span x-text="isInIframe ? 'Yes' : 'No'"></span></div>
-          <div>Mobile device: <span x-text="isMobileDevice ? 'Yes' : 'No'"></span></div>
-          <div>ReactNativeWebView: <span x-text="hasReactNative ? 'Yes' : 'No'"></span></div>
-          <div>Session key: <span x-text="sessionKey ? 'Present' : 'Missing'"></span></div>
-          <div class="mt-2 font-bold">Messages received: <span x-text="getMessageCount()"></span></div>
-          <div x-show="getMessageCount() > 0" class="mt-1 p-1" style="background: rgba(0,0,0,0.1); max-height: 150px; overflow-y: auto;">
-            <template x-for="(msg, i) in getRecentMessages()" :key="i">
-              <div class="text-xs mb-1" style="word-break: break-all;" x-text="msg"></div>
-            </template>
-          </div>
-          <div x-show="getMessageCount() === 0" class="mt-1 text-red-700">
-            ⚠️ No messages received from parent! SN may not be communicating with this iframe.
-          </div>
-          <div class="mt-2 flex gap-2 flex-wrap">
-            <button @click.prevent="forceRetry()" 
-                    class="px-2 py-1 rounded text-white"
-                    style="background: #92400e;">
-              Retry Connection
-            </button>
-            <button @click.prevent="copyDebugInfo()" 
-                    class="px-2 py-1 rounded text-white"
-                    style="background: #1e40af;">
-              Copy Debug Info
-            </button>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Tasks -->
       <div class="space-y-2">
         <template x-for="task in sortedTasks" :key="task.id">
-          <div class="task-item rounded-lg border overflow-hidden"
+          <div class="task-item rounded-lg border p-3"
                :class="{ 'completed': task.done }"
                style="border-color: var(--sn-stylekit-border-color);">
-            
-            <!-- Main task row -->
-            <div class="flex items-start gap-3 p-3" style="background: var(--sn-stylekit-background-color);">
-              <!-- Checkbox -->
+            <div class="flex items-center gap-3">
               <button @click.prevent="toggleTask(task)" 
                       :disabled="locked"
-                      class="flex-shrink-0 w-11 h-11 flex items-center justify-center"
-                      >
-                <span class="w-6 h-6 rounded border-2 flex items-center justify-center"
+                      class="flex-shrink-0 w-6 h-6 rounded border-2 flex items-center justify-center min-w-[24px] min-h-[24px]"
                       :style="task.done ? 'background: var(--sn-stylekit-accent-color); border-color: var(--sn-stylekit-accent-color);' : 'border-color: var(--sn-stylekit-border-color);'">
-                  <svg x-show="task.done" class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
-                  </svg>
-                </span>
+                <svg x-show="task.done" class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
               </button>
               
-              <!-- Task content -->
+              <div class="flex-shrink-0 w-2 h-8 rounded-full" :class="'weight-' + task.weight"></div>
+              
               <div class="flex-1 min-w-0">
-                <!-- Task text / edit -->
-                <div class="flex items-start gap-2">
-                  <template x-if="editingTaskId !== task.id">
-                    <span @click.prevent="startEditTask(task)" 
-                          class="flex-1 cursor-pointer py-1"
-                          :class="{ 'line-through opacity-60': task.done }"
-                          x-text="task.text"></span>
-                  </template>
-                  <template x-if="editingTaskId === task.id">
-                    <input type="text" 
-                           x-model="editingTaskText"
-                           @keydown.enter.prevent="saveEditTask(task)"
-                           @keydown.escape.prevent="cancelEditTask()"
-                           @blur="saveEditTask(task)"
-                           x-ref="editInput"
-                           class="flex-1 px-2 py-1 rounded border text-base"
-                           style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
-                  </template>
-                  
-                  <!-- Weight badge -->
-                  <div class="flex-shrink-0 flex items-center gap-2">
-                    <button @click.prevent="decreaseWeight(task)" 
-                            :disabled="locked || task.weight <= 1"
-                            class="w-8 h-8 rounded text-white text-sm font-bold disabled:opacity-30 flex items-center justify-center"
-                            :class="'weight-' + task.weight">
-                      −
-                    </button>
-                    <span class="w-7 h-7 rounded text-white text-xs font-bold flex items-center justify-center"
-                          :class="'weight-' + task.weight"
-                          x-text="task.weight"></span>
-                    <button @click.prevent="increaseWeight(task)" 
-                            :disabled="locked || task.weight >= 5"
-                            class="w-8 h-8 rounded text-white text-sm font-bold disabled:opacity-30 flex items-center justify-center"
-                            :class="'weight-' + task.weight">
-                      +
-                    </button>
-                  </div>
-                </div>
-                
-                <!-- Due date & time badges -->
-                <div class="flex flex-wrap items-center gap-2 mt-2 text-sm">
-                  <!-- Status badge -->
-                  <span class="px-2 py-0.5 rounded text-xs font-medium text-white"
-                        :style="'background: ' + getStatusColor(task.status || defaultStatus)"
-                        x-text="getStatusLabel(task.status || defaultStatus)"></span>
-                  
-                  <!-- Due date badge -->
-                  <template x-if="task.dueDate">
-                    <span class="px-2 py-0.5 rounded text-xs font-medium"
-                          :class="getDueDateClass(task.dueDate)"
-                          x-text="getDueDateText(task.dueDate)"></span>
-                  </template>
-                  
-                  <!-- Time tracking badge -->
-                  <template x-if="task.estimatedMinutes || task.trackedSeconds || task.timerStartedAt">
-                    <span class="px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1"
-                          :class="task.timerStartedAt ? 'bg-green-500 text-white timer-active' : 'bg-gray-200 dark:bg-gray-700'"
-                          style="background: var(--sn-stylekit-contrast-background-color);">
-                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                      </svg>
-                      <span x-text="(timerTick, getTimeDisplay(task))"></span>
-                    </span>
-                  </template>
-                  
-                  <!-- Subtask count -->
-                  <template x-if="task.subtasks && task.subtasks.length > 0">
-                    <span class="text-xs opacity-60" 
-                          x-text="getSubtaskProgress(task)"></span>
-                  </template>
-                </div>
+                <template x-if="editingTaskId !== task.id">
+                  <div @click="!locked && startEditTask(task)" 
+                       class="cursor-pointer break-words"
+                       :class="{ 'line-through opacity-60': task.done }"
+                       x-text="task.text"></div>
+                </template>
+                <template x-if="editingTaskId === task.id">
+                  <input type="text" 
+                         x-model="editingTaskText"
+                         x-ref="editInput"
+                         @keydown.enter.prevent="saveEditTask(task)"
+                         @keydown.escape.prevent="cancelEditTask()"
+                         @blur="saveEditTask(task)"
+                         class="w-full px-2 py-1 rounded border text-base"
+                         style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                </template>
               </div>
               
-              <!-- Expand/collapse button -->
+              <div x-show="task.timerStartedAt" 
+                   class="flex-shrink-0 text-sm font-mono timer-active"
+                   style="color: var(--sn-stylekit-accent-color);"
+                   x-text="formatRunningTime(task)"></div>
+              
+              <div x-show="task.dueDate && !task.done" 
+                   class="flex-shrink-0 text-xs px-2 py-1 rounded"
+                   :class="getDueDateClass(task.dueDate)"
+                   x-text="getDueDateText(task.dueDate)"></div>
+              
+              <div x-show="task.subtasks && task.subtasks.length > 0" 
+                   class="flex-shrink-0 text-xs opacity-60"
+                   x-text="getSubtaskProgress(task)"></div>
+              
               <button @click.prevent="toggleExpanded(task)" 
-                      class="flex-shrink-0 w-11 h-11 rounded hover:opacity-80 flex items-center justify-center">
-                <svg class="w-5 h-5 transition-transform" 
+                      class="flex-shrink-0 p-1 rounded hover:opacity-80 min-w-[32px] min-h-[32px] flex items-center justify-center"
+                      style="background: var(--sn-stylekit-contrast-background-color);">
+                <svg class="w-4 h-4 transition-transform" 
                      :class="{ 'rotate-180': expandedTaskId === task.id }"
                      fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
@@ -348,829 +597,202 @@
               </button>
             </div>
             
-            <!-- Expanded details -->
-            <div x-show="expandedTaskId === task.id" 
-                 x-collapse
-                 class="border-t px-4 py-3 space-y-4"
-                 style="background: var(--sn-stylekit-contrast-background-color); border-color: var(--sn-stylekit-border-color);">
-              
-              <!-- Status dropdown -->
-              <div class="flex items-center gap-3">
-                <label class="text-sm font-medium w-20">Status:</label>
-                <select @change.prevent="setTaskStatus(task, $event.target.value)"
-                        :disabled="locked"
-                        class="flex-1 px-3 py-2 rounded border text-sm min-h-[44px]"
-                        style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
-                  <template x-for="s in statuses" :key="s.id">
-                    <option :value="s.id" 
-                            :selected="(task.status || defaultStatus) === s.id"
-                            x-text="s.label"></option>
-                  </template>
-                </select>
+            <div x-show="expandedTaskId === task.id" x-collapse class="mt-3 pt-3 border-t" style="border-color: var(--sn-stylekit-border-color);">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="text-sm opacity-60">Priority:</span>
+                <button @click.prevent="decreaseWeight(task)" :disabled="locked || task.weight <= 1"
+                        class="px-2 py-1 rounded text-sm disabled:opacity-30 min-w-[32px] min-h-[32px]"
+                        style="background: var(--sn-stylekit-contrast-background-color);">−</button>
+                <span class="w-8 text-center font-medium" x-text="task.weight"></span>
+                <button @click.prevent="increaseWeight(task)" :disabled="locked || task.weight >= 5"
+                        class="px-2 py-1 rounded text-sm disabled:opacity-30 min-w-[32px] min-h-[32px]"
+                        style="background: var(--sn-stylekit-contrast-background-color);">+</button>
               </div>
               
-              <!-- Due date input -->
-              <div class="flex items-center gap-3">
-                <label class="text-sm font-medium w-20">Due:</label>
-                <input type="date" 
-                       :value="task.dueDate || ''"
-                       @change.prevent="setDueDate(task, $event.target.value)"
-                       :disabled="locked"
-                       class="flex-1 px-3 py-2 rounded border text-sm min-h-[44px]"
+              <div class="flex items-center gap-2 mb-3">
+                <span class="text-sm opacity-60">Due:</span>
+                <input type="date" :value="task.dueDate" @change="setDueDate(task, $event.target.value)" :disabled="locked"
+                       class="px-2 py-1 rounded border text-sm min-h-[32px]"
                        style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
-                <button x-show="task.dueDate" @click.prevent="setDueDate(task, null)" 
-                        :disabled="locked"
-                        class="px-2 py-2 text-sm opacity-60 hover:opacity-100 min-w-[44px] min-h-[44px]">
-                  Clear
-                </button>
+                <button x-show="task.dueDate" @click.prevent="setDueDate(task, null)" :disabled="locked"
+                        class="text-xs opacity-60 hover:opacity-100 min-w-[32px] min-h-[32px]">Clear</button>
               </div>
               
-              <!-- Time estimate input -->
-              <div class="flex items-center gap-3">
-                <label class="text-sm font-medium w-20">Estimate:</label>
-                <input type="text" 
-                       :value="formatMinutesForInput(task.estimatedMinutes)"
-                       @blur="setEstimate(task, $event.target.value)"
-                       @keydown.enter.prevent="setEstimate(task, $event.target.value); $event.target.blur()"
-                       :disabled="locked"
-                       placeholder="e.g. 30m, 1h, 1h30m"
-                       class="flex-1 px-3 py-2 rounded border text-sm min-h-[44px]"
-                       style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="text-sm opacity-60">Time:</span>
+                <span class="font-mono text-sm" x-text="formatTrackedTime(task)"></span>
+                <button x-show="!task.timerStartedAt && !task.done" @click.prevent="startTimer(task)" :disabled="locked"
+                        class="px-2 py-1 rounded text-xs min-h-[28px]" style="background: var(--sn-stylekit-accent-color); color: white;">Start</button>
+                <button x-show="task.timerStartedAt" @click.prevent="stopTimer(task)"
+                        class="px-2 py-1 rounded text-xs min-h-[28px]" style="background: #ef4444; color: white;">Stop</button>
               </div>
               
-              <!-- Timer controls -->
-              <div class="flex items-center gap-3">
-                <label class="text-sm font-medium w-20">Timer:</label>
-                <div class="flex-1 flex items-center gap-3">
-                  <button @click.prevent="toggleTimer(task)" 
-                          :disabled="locked"
-                          class="px-4 py-2 rounded font-medium text-sm min-h-[44px]"
-                          :class="task.timerStartedAt ? 'bg-red-500 text-white' : 'bg-green-500 text-white'">
-                    <span x-text="task.timerStartedAt ? 'Stop' : 'Start'"></span>
-                  </button>
-                  <span class="text-sm" x-text="'Tracked: ' + (timerTick, formatSeconds(getCurrentTrackedSeconds(task)))"></span>
-                  <button x-show="task.trackedSeconds > 0 || task.timerStartedAt" 
-                          @click.prevent="resetTimer(task)"
-                          :disabled="locked"
-                          class="px-2 py-2 text-sm opacity-60 hover:opacity-100 min-w-[44px] min-h-[44px]">
-                    Reset
-                  </button>
-                </div>
-              </div>
-              
-              <!-- Subtasks -->
-              <div>
-                <div class="flex items-center gap-3 mb-2">
-                  <label class="text-sm font-medium w-20">Subtasks:</label>
-                  <div class="flex-1 flex gap-2" x-show="!locked">
-                    <input type="text" 
-                           x-model="newSubtaskText"
-                           @keydown.enter.prevent="addSubtask(task)"
-                           placeholder="Add subtask..."
-                           class="flex-1 px-3 py-2 rounded border text-sm min-h-[44px]"
-                           style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
-                    <button @click.prevent="addSubtask(task)" 
-                            :disabled="!newSubtaskText.trim()"
-                            class="px-3 py-2 rounded text-sm font-medium disabled:opacity-50 min-h-[44px]"
-                            style="background: var(--sn-stylekit-accent-color); color: white;">
-                      Add
-                    </button>
-                  </div>
-                </div>
-                
-                <!-- Subtask list -->
-                <div class="space-y-1 ml-20" x-show="task.subtasks && task.subtasks.length > 0">
-                  <template x-for="subtask in task.subtasks" :key="subtask.id">
-                    <div class="flex items-center gap-2 py-1">
-                      <button @click.prevent="toggleSubtask(task, subtask)" 
-                              :disabled="locked"
-                              class="w-9 h-9 flex-shrink-0 flex items-center justify-center">
-                        <span class="w-5 h-5 rounded border flex items-center justify-center"
+              <div class="mb-3">
+                <div class="text-sm opacity-60 mb-2">Subtasks:</div>
+                <div class="space-y-1 mb-2">
+                  <template x-for="subtask in (task.subtasks || [])" :key="subtask.id">
+                    <div class="flex items-center gap-2 pl-2">
+                      <button @click.prevent="toggleSubtask(task, subtask)" :disabled="locked"
+                              class="flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center"
                               :style="subtask.done ? 'background: var(--sn-stylekit-accent-color); border-color: var(--sn-stylekit-accent-color);' : 'border-color: var(--sn-stylekit-border-color);'">
-                          <svg x-show="subtask.done" class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
-                          </svg>
-                        </span>
-                      </button>
-                      <span class="flex-1 text-sm" 
-                            :class="{ 'line-through opacity-60': subtask.done }"
-                            x-text="subtask.text"></span>
-                      <button @click.prevent="deleteSubtask(task, subtask)" 
-                              :disabled="locked"
-                              class="w-9 h-9 flex items-center justify-center opacity-40 hover:opacity-100">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        <svg x-show="subtask.done" class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                          <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
                         </svg>
                       </button>
+                      <span class="flex-1 text-sm" :class="{ 'line-through opacity-60': subtask.done }" x-text="subtask.text"></span>
+                      <button @click.prevent="deleteSubtask(task, subtask)" :disabled="locked"
+                              class="text-xs opacity-40 hover:opacity-100 min-w-[24px] min-h-[24px]">×</button>
                     </div>
                   </template>
                 </div>
+                <div class="flex gap-2" x-show="!locked">
+                  <input type="text" x-model="newSubtaskText" @keydown.enter.prevent="addSubtask(task)" placeholder="Add subtask..."
+                         class="flex-1 px-2 py-1 rounded border text-sm min-h-[32px]"
+                         style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                  <button @click.prevent="addSubtask(task)" :disabled="!newSubtaskText.trim()"
+                          class="px-2 py-1 rounded text-sm disabled:opacity-50 min-h-[32px]" style="background: var(--sn-stylekit-accent-color); color: white;">Add</button>
+                </div>
               </div>
               
-              <!-- Delete task -->
-              <div class="pt-2 border-t flex justify-end" style="border-color: var(--sn-stylekit-border-color);">
-                <button @click.prevent="deleteTask(task)" 
-                        :disabled="locked"
-                        class="px-4 py-2 rounded text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 min-h-[44px]">
-                  Delete task
-                </button>
-              </div>
+              <button @click.prevent="deleteTask(task)" :disabled="locked"
+                      class="text-sm opacity-60 hover:opacity-100 min-h-[32px]" style="color: #ef4444;">Delete task</button>
             </div>
           </div>
         </template>
         
-        <!-- Empty state -->
-        <div x-show="items.length === 0" class="text-center py-12 opacity-50">
-          <p class="text-lg">No tasks yet</p>
-          <p class="text-sm mt-1">Add your first task above</p>
+        <div x-show="items.length === 0" class="text-center py-12 opacity-60">
+          <p>No tasks yet. Add one above!</p>
         </div>
       </div>
     </main>
     
     <!-- Kanban view -->
-    <main x-show="viewMode === 'kanban'" class="flex-1 overflow-hidden flex flex-col">
-      <!-- Add task input for kanban -->
-      <div class="flex-shrink-0 px-4 py-3 border-b" x-show="!locked" style="border-color: var(--sn-stylekit-border-color);">
-        <div class="flex gap-2">
-          <input type="text" 
-                 x-model="newTaskText" 
-                 @keydown.enter.prevent="addTask()"
-                 placeholder="Add a task..."
-                 :disabled="locked"
-                 class="flex-1 px-4 py-3 rounded-lg border text-base min-h-[44px]"
-                 style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
-          <button @click.prevent="addTask()" 
-                  :disabled="!newTaskText.trim() || locked"
-                  class="px-4 py-3 rounded-lg font-medium min-w-[44px] min-h-[44px] disabled:opacity-50"
-                  style="background: var(--sn-stylekit-accent-color); color: white;">
-            Add
-          </button>
-        </div>
-      </div>
-      
-      <!-- Kanban columns -->
-      <div class="flex-1 overflow-x-auto overflow-y-hidden">
-        <div class="flex gap-3 p-4 h-full min-w-max">
-          <template x-for="status in statuses" :key="status.id">
-            <div class="flex flex-col w-72 flex-shrink-0 rounded-lg overflow-hidden"
-                 style="background: var(--sn-stylekit-contrast-background-color);"
-                 @dragover.prevent="onDragOver($event)"
-                 @drop.prevent="onDrop($event, status.id)">
-              
-              <!-- Column header -->
-              <div class="flex items-center justify-between px-3 py-2 border-b"
-                   :style="'border-color: ' + status.color + '; border-bottom-width: 3px;'">
+    <main x-show="viewMode === 'kanban'" class="flex-1 overflow-x-auto custom-scroll">
+      <div class="flex gap-4 p-4 min-h-full">
+        <template x-for="status in statuses" :key="status.id">
+          <div class="flex-shrink-0 w-72 flex flex-col rounded-lg"
+               style="background: var(--sn-stylekit-contrast-background-color);"
+               @dragover.prevent="onDragOver($event)"
+               @drop.prevent="onDrop($event, status.id)">
+            <div class="px-3 py-2 border-b flex items-center justify-between" style="border-color: var(--sn-stylekit-border-color);">
+              <div class="flex items-center gap-2">
+                <div class="w-3 h-3 rounded-full" :style="'background: ' + status.color"></div>
                 <span class="font-medium text-sm" x-text="status.label"></span>
-                <span class="text-xs opacity-60 px-2 py-0.5 rounded-full"
-                      style="background: var(--sn-stylekit-background-color);"
-                      x-text="getColumnCount(status.id)"></span>
               </div>
-              
-              <!-- Column cards -->
-              <div class="flex-1 overflow-y-auto custom-scroll p-2 space-y-2">
-                <template x-for="task in getTasksByStatus(status.id)" :key="task.id">
-                  <div class="rounded-lg border p-3 cursor-move transition-shadow hover:shadow-md"
-                       style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color);"
-                       draggable="true"
-                       @dragstart="onDragStart($event, task)"
-                       @dragend="onDragEnd($event)">
-                    
-                    <!-- Card header: checkbox + text -->
-                    <div class="flex items-start gap-2">
-                      <button @click.prevent="toggleTask(task)" 
-                              :disabled="locked"
-                              class="flex-shrink-0 w-5 h-5 mt-0.5 rounded border flex items-center justify-center"
-                              :style="task.done ? 'background: var(--sn-stylekit-accent-color); border-color: var(--sn-stylekit-accent-color);' : 'border-color: var(--sn-stylekit-border-color);'">
-                        <svg x-show="task.done" class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
-                        </svg>
-                      </button>
-                      <span class="flex-1 text-sm leading-tight"
-                            :class="{ 'line-through opacity-60': task.done }"
-                            x-text="task.text"></span>
-                    </div>
-                    
-                    <!-- Card badges -->
-                    <div class="flex flex-wrap items-center gap-1.5 mt-2" x-show="task.dueDate || task.estimatedMinutes || task.trackedSeconds || task.timerStartedAt || (task.subtasks && task.subtasks.length > 0)">
-                      <!-- Weight -->
-                      <span class="w-5 h-5 rounded text-white text-xs font-bold flex items-center justify-center"
-                            :class="'weight-' + task.weight"
-                            x-text="task.weight"></span>
-                      
-                      <!-- Due date -->
-                      <template x-if="task.dueDate">
-                        <span class="px-1.5 py-0.5 rounded text-xs font-medium"
-                              :class="getDueDateClass(task.dueDate)"
-                              x-text="getDueDateText(task.dueDate)"></span>
-                      </template>
-                      
-                      <!-- Time tracking -->
-                      <template x-if="task.estimatedMinutes || task.trackedSeconds || task.timerStartedAt">
-                        <span class="px-1.5 py-0.5 rounded text-xs font-medium flex items-center gap-1"
-                              :class="task.timerStartedAt ? 'bg-green-500 text-white timer-active' : ''"
-                              :style="!task.timerStartedAt ? 'background: var(--sn-stylekit-border-color);' : ''">
-                          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                          </svg>
-                          <span x-text="(timerTick, getTimeDisplay(task))"></span>
-                        </span>
-                      </template>
-                      
-                      <!-- Subtasks -->
-                      <template x-if="task.subtasks && task.subtasks.length > 0">
-                        <span class="text-xs opacity-60" x-text="getSubtaskProgress(task)"></span>
-                      </template>
-                    </div>
-                    
-                    <!-- Quick actions -->
-                    <div class="flex items-center justify-between mt-2 pt-2 border-t" style="border-color: var(--sn-stylekit-border-color);">
-                      <button @click.prevent="toggleTimer(task)"
-                              :disabled="locked"
-                              class="text-xs px-2 py-1 rounded hover:opacity-80"
-                              :class="task.timerStartedAt ? 'bg-red-500 text-white' : 'bg-green-500 text-white'">
-                        <span x-text="task.timerStartedAt ? 'Stop' : 'Start'"></span>
-                      </button>
-                      <button @click.prevent="viewMode = 'list'; expandedTaskId = task.id;"
-                              class="text-xs px-2 py-1 rounded opacity-60 hover:opacity-100"
-                              style="background: var(--sn-stylekit-border-color);">
-                        Edit
-                      </button>
+              <span class="text-xs opacity-60" x-text="getColumnCount(status.id)"></span>
+            </div>
+            <div class="flex-1 p-2 space-y-2 overflow-y-auto custom-scroll">
+              <template x-for="task in getTasksByStatus(status.id)" :key="task.id">
+                <div class="p-3 rounded-lg cursor-move" style="background: var(--sn-stylekit-background-color);"
+                     draggable="true" @dragstart="onDragStart($event, task)" @dragend="onDragEnd($event)">
+                  <div class="flex items-start gap-2">
+                    <div class="flex-shrink-0 w-1.5 h-full min-h-[20px] rounded-full mt-1" :class="'weight-' + task.weight"></div>
+                    <div class="flex-1 min-w-0">
+                      <div class="text-sm break-words" x-text="task.text"></div>
+                      <div class="flex items-center gap-2 mt-1 text-xs opacity-60">
+                        <span x-show="task.dueDate" x-text="getDueDateText(task.dueDate)"></span>
+                        <span x-show="task.subtasks && task.subtasks.length > 0" x-text="getSubtaskProgress(task)"></span>
+                      </div>
                     </div>
                   </div>
-                </template>
-                
-                <!-- Empty column state -->
-                <div x-show="getTasksByStatus(status.id).length === 0" 
-                     class="text-center py-8 opacity-40 text-sm">
-                  Drop tasks here
                 </div>
-              </div>
+              </template>
             </div>
-          </template>
-        </div>
+          </div>
+        </template>
       </div>
     </main>
   </div>
-  
+
   <script>
-    // ========================================
-    // KANBAN CONFIGURATION - Edit these to customize
-    // ========================================
-    const STATUSES = [
+    var STATUSES = [
       { id: 'backlog', label: 'Backlog', color: '#64748b' },
-      { id: 'scheduled', label: 'Scheduled', color: '#0ea5e9' },
-      { id: 'ready', label: 'Ready', color: '#3b82f6' },
-      { id: 'inprogress', label: 'In Progress', color: '#f59e0b' },
-      { id: 'blocked', label: 'Blocked', color: '#ef4444' },
-      { id: 'review', label: 'In Review', color: '#8b5cf6' },
-      { id: 'waiting', label: 'Waiting / Pending', color: '#ec4899' },
-      { id: 'done', label: 'Done', color: '#22c55e' },
-      { id: 'someday', label: 'Someday / Parked', color: '#78716c' },
+      { id: 'todo', label: 'To Do', color: '#3b82f6' },
+      { id: 'in-progress', label: 'In Progress', color: '#f59e0b' },
+      { id: 'done', label: 'Done', color: '#22c55e' }
     ];
+    var DEFAULT_STATUS = 'todo';
     
-    const DEFAULT_STATUS = 'backlog';  // New tasks get this status
-    
-    // ========================================
-    // STANDARD NOTES SYNC CODE - ENHANCED MOBILE SUPPORT
-    // ========================================
-    
-    var sessionKey = null;
-    var lastNote = null;
-    var sentMessages = [];
-    var isMobile = false;
-    var pendingNoteData = null;
-    var DEBUG_MODE = true; // ENABLED for mobile debugging
-    var allReceivedMessages = []; // Store all messages for debugging
-    
-    // Detect mobile environment early
-    var isInIframe = window.parent !== window;
-    var hasReactNative = typeof window.ReactNativeWebView !== 'undefined';
-    var hasWebkitHandlers = typeof window.webkit !== 'undefined' && 
-                            window.webkit.messageHandlers !== undefined;
-    var userAgent = navigator.userAgent || '';
-    var isAndroid = /android/i.test(userAgent);
-    var isIOS = /iphone|ipad|ipod/i.test(userAgent);
-    var isMobileDevice = isAndroid || isIOS || hasReactNative;
-    
-    function debugLog() {
-      if (DEBUG_MODE && console && console.log) {
-        console.log.apply(console, ['[SN-Ext]'].concat(Array.prototype.slice.call(arguments)));
-      }
-    }
-
     function genUUID() {
-      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        var r = Math.random() * 16 | 0;
-        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-      });
-    }
-
-    // Global handler that SN can call directly via injectJavaScript
-    // This is the KEY fix for mobile - SN may call this instead of postMessage
-    window.snComponentMessage = function(message) {
-      debugLog('snComponentMessage called with:', message);
-      processIncomingMessage(message);
-    };
-    
-    // Alternative global handlers SN might use
-    window.postMessageFromStandardNotes = function(message) {
-      debugLog('postMessageFromStandardNotes called');
-      processIncomingMessage(message);
-    };
-    
-    window.receiveMessage = function(message) {
-      debugLog('receiveMessage called');
-      processIncomingMessage(message);
-    };
-    
-    // Flag to signal component is ready (SN mobile may check for this)
-    window.isComponentReady = true;
-    window.componentReady = true;
-
-    function postMessage(action, data, callback) {
-      var msgId = genUUID();
-      var msg = {
-        action: action,
-        data: data,
-        messageId: msgId,
-        sessionKey: sessionKey,
-        api: 'component'
-      };
-
-      if (callback) {
-        sentMessages.push({ messageId: msgId, callback: callback });
-      }
-
-      var msgString = JSON.stringify(msg);
-      debugLog('Sending message:', action, 'mobile:', isMobile);
-
-      // Always try multiple methods for reliability
-      try {
-        // Method 1: Standard postMessage to parent (works in desktop Electron)
-        // Note: Only send object to postMessage, not stringified (mobile gets confused by duplicates)
-        if (window.parent && window.parent !== window) {
-          window.parent.postMessage(msg, '*');
-        }
-      } catch (e) { debugLog('parent.postMessage error:', e); }
-
-      try {
-        // Method 2: React Native WebView bridge
-        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
-          window.ReactNativeWebView.postMessage(msgString);
-        }
-      } catch (e) { debugLog('ReactNativeWebView.postMessage error:', e); }
-
-      try {
-        // Method 3: iOS WKWebView message handlers
-        if (window.webkit && window.webkit.messageHandlers) {
-          // Try common handler names SN might use
-          var handlers = ['appMessageHandler', 'nativeMessageHandler', 'snMessageHandler', 'ReactNativeWebView'];
-          for (var i = 0; i < handlers.length; i++) {
-            if (window.webkit.messageHandlers[handlers[i]]) {
-              window.webkit.messageHandlers[handlers[i]].postMessage(msgString);
-              break;
-            }
-          }
-        }
-      } catch (e) { debugLog('webkit.messageHandlers error:', e); }
-      
-      try {
-        // Method 4: Post to top frame (in case of nested iframes)
-        if (window.top && window.top !== window && window.top !== window.parent) {
-          window.top.postMessage(msg, '*');
-        }
-      } catch (e) { debugLog('top.postMessage error:', e); }
-    }
-
-    function saveToSN() {
-      if (!lastNote || !sessionKey) return;
-
-      var text = JSON.stringify({ version: 1, items: window.appInstance.items });
-      lastNote.content.text = text;
-      lastNote.content.preview_plain = window.appInstance.getPreview();
-
-      var itemCopy = JSON.parse(JSON.stringify(lastNote));
-      delete itemCopy.children;
-      delete itemCopy.parent;
-
-      postMessage('save-items', { items: [itemCopy] });
-    }
-
-    var processedMessages = {};
-    
-    function processIncomingMessage(data) {
-      // Parse if string
-      if (typeof data === 'string') {
-        try { 
-          data = JSON.parse(data); 
-        } catch (e) { 
-          debugLog('JSON parse error:', e);
-          return; 
-        }
-      }
-      
-      if (!data || typeof data !== 'object') {
-        debugLog('Invalid message data:', data);
-        return;
-      }
-      
-      // Check for alternative action formats SN might use
-      var action = data.action || data.type || data.event || data.cmd || data.method;
-      if (!action) {
-        // Maybe it's a component-registered with different structure
-        if (data.sessionKey) {
-          debugLog('Found sessionKey in message without action, treating as registration');
-          action = 'component-registered';
-          data.action = action;
-        } else {
-          debugLog('Message missing action:', Object.keys(data));
-          return;
-        }
-      }
-      
-      // Normalize action name (SN might use different naming)
-      var normalizedAction = action.toLowerCase().replace(/[-_]/g, '');
-      debugLog('Processing action:', action, '(normalized:', normalizedAction + ')');
-      
-      // Deduplicate
-      var msgKey = data.messageId || data.id || (data.original && data.original.messageId) || action + '-' + Date.now();
-      if (processedMessages[msgKey]) {
-        debugLog('Duplicate message ignored:', msgKey);
-        return;
-      }
-      processedMessages[msgKey] = true;
-      setTimeout(function() { delete processedMessages[msgKey]; }, 5000);
-
-      // Handle component registration (check various formats)
-      if (normalizedAction === 'componentregistered' || 
-          normalizedAction === 'registered' ||
-          normalizedAction === 'ready' ||
-          normalizedAction === 'componentready' ||
-          action === 'component-registered') {
-        debugLog('Component registered! sessionKey:', data.sessionKey ? 'present' : 'missing');
-        sessionKey = data.sessionKey || data.session_key || data.key;
-        if (data.data) {
-          if (data.data.environment === 'mobile') {
-            isMobile = true;
-            debugLog('Mobile environment detected');
-          }
-          // Try to get sessionKey from nested data
-          if (!sessionKey && data.data.sessionKey) {
-            sessionKey = data.data.sessionKey;
-          }
-        }
-        if (window.appInstance) {
-          window.appInstance.inStandardNotes = true;
-          window.appInstance.connectionAttempts = 0;
-        }
-        postMessage('stream-context-item', {}, function(response) {
-          if (response && response.item) {
-            handleNote(response.item);
-          }
+      return crypto.randomUUID ? crypto.randomUUID() : 
+        'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          var r = Math.random() * 16 | 0;
+          return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
         });
-        if (data.data && data.data.activeThemeUrls) {
-          activateThemes(data.data.activeThemeUrls);
-        }
-        return;
-      }
-      
-      // Handle "activate-component" or similar (SN might send this first)
-      if (normalizedAction === 'activatecomponent' ||
-          normalizedAction === 'activate' ||
-          normalizedAction === 'init' ||
-          normalizedAction === 'initialize') {
-        debugLog('Received activate message, re-sending init');
-        sendInitMessage();
-        return;
-      }
-
-      if (action === 'themes' || normalizedAction === 'themes' || normalizedAction === 'theme') {
-        if (data.data && data.data.themes) {
-          activateThemes(data.data.themes);
-        } else if (data.themes) {
-          activateThemes(data.themes);
-        }
-      }
-
-      if (data.original && data.original.messageId) {
-        for (var i = 0; i < sentMessages.length; i++) {
-          if (sentMessages[i].messageId === data.original.messageId) {
-            if (sentMessages[i].callback) {
-              sentMessages[i].callback(data.data);
-            }
-            sentMessages.splice(i, 1);
-            break;
-          }
-        }
-      }
-
-      if ((action === 'stream-context-item' || normalizedAction === 'streamcontextitem') && 
-          data.data && data.data.item) {
-        handleNote(data.data.item);
-      }
-      
-      // Handle direct note data (SN might send note without wrapping)
-      if (data.content && data.content.text && data.uuid) {
-        debugLog('Received direct note data');
-        handleNote(data);
-      }
-    }
-    
-    function handleMessage(event) {
-      var data = event.data;
-      
-      // Log ALL messages for debugging (even before filtering)
-      try {
-        var logEntry = {
-          time: new Date().toISOString(),
-          origin: event.origin,
-          type: typeof data,
-          hasNativeEvent: !!event.nativeEvent,
-          raw: typeof data === 'string' ? data.substring(0, 200) : JSON.stringify(data).substring(0, 200)
-        };
-        allReceivedMessages.push(logEntry);
-        if (allReceivedMessages.length > 50) allReceivedMessages.shift(); // Keep last 50
-        debugLog('RAW MESSAGE:', logEntry);
-      } catch (e) {}
-      
-      // Handle React Native WebView format (data might be in nativeEvent)
-      if (event.nativeEvent && event.nativeEvent.data) {
-        data = event.nativeEvent.data;
-      }
-      
-      debugLog('handleMessage received:', typeof data, data && data.action ? data.action : '');
-      processIncomingMessage(data);
-    }
-    
-    // Also add a global catch-all for ANY postMessage
-    window.addEventListener('message', function(e) {
-      try {
-        if (e.data && typeof e.data === 'object' && e.data.action) {
-          debugLog('GLOBAL CATCH:', e.data.action);
-        }
-      } catch(err) {}
-    }, true);
-
-    function handleNote(note) {
-      if (!note) return;
-      if (note.isMetadataUpdate) return;
-
-      debugLog('Received note update');
-      lastNote = note;
-      
-      var items = [];
-      if (note.content && note.content.text) {
-        items = parseData(note.content.text);
-      }
-
-      var locked = false;
-      if (note.content && note.content.appData && note.content.appData['org.standardnotes.sn']) {
-        locked = !!note.content.appData['org.standardnotes.sn'].locked;
-      }
-
-      if (window.appInstance) {
-        window.appInstance.items = items;
-        window.appInstance.locked = locked;
-        window.appInstance.inStandardNotes = true;
-      } else {
-        pendingNoteData = { items: items, locked: locked };
-      }
     }
 
-    function parseData(text) {
-      try {
-        var data = JSON.parse(text);
-        if (data && data.version === 1 && Array.isArray(data.items)) {
-          return data.items;
-        }
-      } catch (e) {}
-      return [];
-    }
-
-    function activateThemes(urls) {
-      var oldThemes = document.querySelectorAll('.sn-theme');
-      for (var i = 0; i < oldThemes.length; i++) {
-        oldThemes[i].parentNode.removeChild(oldThemes[i]);
-      }
-
-      for (var j = 0; j < urls.length; j++) {
-        if (!urls[j]) continue;
-        var link = document.createElement('link');
-        link.className = 'sn-theme';
-        link.rel = 'stylesheet';
-        link.href = urls[j];
-        document.head.appendChild(link);
-      }
-    }
-
-    function initSN() {
-      debugLog('initSN called, isInIframe:', isInIframe, 'isMobileDevice:', isMobileDevice);
-      
-      // Listen for messages - comprehensive cross-platform approach
-      
-      // Standard window message event
-      window.addEventListener('message', handleMessage, false);
-      
-      // Capture phase (needed for some Android WebViews)
-      window.addEventListener('message', handleMessage, true);
-      
-      // Document message event (Android React Native WebView sometimes fires here)
-      document.addEventListener('message', handleMessage, false);
-      document.addEventListener('message', handleMessage, true);
-      
-      // Also listen on body in case events bubble there
-      if (document.body) {
-        document.body.addEventListener('message', handleMessage, false);
-      }
-      
-      // For mobile: try to detect when SN injects content
-      // by using MutationObserver to watch for changes
-      if (isMobileDevice && typeof MutationObserver !== 'undefined') {
-        var observer = new MutationObserver(function(mutations) {
-          // SN might inject a script that sets global variables
-          if (window.snComponentData && !sessionKey) {
-            debugLog('Found snComponentData via MutationObserver');
-            processIncomingMessage(window.snComponentData);
-          }
-        });
-        observer.observe(document.documentElement, { 
-          childList: true, 
-          subtree: true 
-        });
-        // Stop observing after 10 seconds to avoid performance impact
-        setTimeout(function() { observer.disconnect(); }, 10000);
-      }
-
-      if (isInIframe) {
-        sendInitMessage();
-      }
-    }
-    
-    function sendInitMessage() {
-      if (sessionKey) return;
-      
-      debugLog('sendInitMessage called');
-      
-      // Minimal init message - matching what working extensions send
-      // Extra fields in 'data' can confuse SN mobile
-      var initMsg = {
-        action: 'component-initialized',
-        messageId: genUUID(),
-        api: 'component'
-      };
-      
-      var msgString = JSON.stringify(initMsg);
-      
-      try {
-        // Method 1: Standard postMessage to parent (desktop Electron)
-        // Only send object version, not stringified (duplicates confuse mobile)
-        if (window.parent && window.parent !== window) {
-          window.parent.postMessage(initMsg, '*');
-        }
-      } catch (e) { debugLog('Init parent.postMessage error:', e); }
-      
-      try {
-        // Method 2: React Native WebView bridge (Android/iOS RN apps)
-        // RN WebView REQUIRES string format
-        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
-          window.ReactNativeWebView.postMessage(msgString);
-        }
-      } catch (e) { debugLog('Init ReactNativeWebView error:', e); }
-      
-      try {
-        // Method 3: Webkit message handlers (iOS WKWebView)
-        if (window.webkit && window.webkit.messageHandlers) {
-          var handlers = ['appMessageHandler', 'nativeMessageHandler', 'snMessageHandler', 'ReactNativeWebView'];
-          for (var i = 0; i < handlers.length; i++) {
-            if (window.webkit.messageHandlers[handlers[i]]) {
-              window.webkit.messageHandlers[handlers[i]].postMessage(msgString);
-              break; // Only send to first available handler
-            }
-          }
-        }
-      } catch (e) { debugLog('Init webkit error:', e); }
-      
-      try {
-        // Method 4: Top frame (nested iframes)
-        if (window.top && window.top !== window && window.top !== window.parent) {
-          window.top.postMessage(initMsg, '*');
-        }
-      } catch (e) { debugLog('Init top.postMessage error:', e); }
-      
-      // Signal readiness
-      window.componentInitialized = true;
-      
-      // Dispatch custom event that SN might listen for
-      try {
-        var event = new CustomEvent('component-initialized', { 
-          detail: initMsg,
-          bubbles: true 
-        });
-        window.dispatchEvent(event);
-        document.dispatchEvent(event);
-      } catch (e) { debugLog('Custom event error:', e); }
-    }
-    
-    // Initialize SN connection - wait for DOM on mobile for reliability
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initSN);
-    } else {
-      initSN();
-    }
-    
-    // Expose debug toggle for troubleshooting
-    window.enableSNDebug = function() { 
-      DEBUG_MODE = true; 
-      console.log('[SN-Ext] Debug mode enabled');
-      console.log('[SN-Ext] sessionKey:', sessionKey ? 'present' : 'missing');
-      console.log('[SN-Ext] isMobile:', isMobile);
-      console.log('[SN-Ext] isInIframe:', isInIframe);
-      console.log('[SN-Ext] hasReactNative:', hasReactNative);
-    };
-    
-    // ========================================
-    // ALPINE.JS APP
-    // ========================================
-    
     function productivityApp() {
       return {
-        // State
         items: [],
         locked: false,
         darkMode: false,
         inStandardNotes: false,
-        connectionAttempts: 0,
-        sortBy: 'weight', // 'weight' or 'dueDate'
-        viewMode: 'list', // 'list' or 'kanban'
-        
-        // Debug state
-        debugInfoVisible: false,
-        
-        // Expose global detection variables to template
-        get isInIframe() { return isInIframe; },
-        get isMobileDevice() { return isMobileDevice; },
-        get hasReactNative() { return hasReactNative; },
-        get sessionKey() { return sessionKey; },
-        
-        // Kanban config (from global)
+        sortBy: 'weight',
+        viewMode: 'list',
         statuses: STATUSES,
         defaultStatus: DEFAULT_STATUS,
-        
-        // UI state
         newTaskText: '',
         newSubtaskText: '',
         editingTaskId: null,
         editingTaskText: '',
         expandedTaskId: null,
-        
-        // Timer tick (updates every second for live display)
         timerTick: 0,
-        
-        // Timer update interval
         timerInterval: null,
         
-        // Initialize
         init() {
-          window.appInstance = this;
+          var self = this;
           
-          // Check if SN already sent note data before Alpine initialized
-          if (pendingNoteData) {
-            this.items = pendingNoteData.items;
-            this.locked = pendingNoteData.locked;
-            this.inStandardNotes = true;
-            pendingNoteData = null;
-          } else if (sessionKey) {
-            // SN registered but no note data yet - we're in SN
-            this.inStandardNotes = true;
-            this.loadFromStorage();
-          } else {
-            // Load from localStorage as fallback (standalone mode)
-            this.loadFromStorage();
+          // Initialize the SN API (uses the proven working implementation)
+          if (window.snApi) {
+            console.log('[Productivity] Initializing sn-extension-api');
             
-            // If in iframe but not connected yet, retry init messages
-            if (window.parent !== window) {
-              this.retryConnection();
+            try {
+              snApi.initialize();
+              
+              snApi.subscribe(function(text, meta) {
+                console.log('[Productivity] Note received from SN');
+                self.inStandardNotes = true;
+                
+                if (text) {
+                  try {
+                    var data = JSON.parse(text);
+                    if (data && data.version === 1 && Array.isArray(data.items)) {
+                      self.items = data.items;
+                    }
+                  } catch (e) {
+                    console.log('[Productivity] Parse error:', e);
+                    self.items = [];
+                  }
+                } else {
+                  self.items = [];
+                }
+                
+                try {
+                  self.locked = snApi.locked || false;
+                } catch (e) {
+                  self.locked = false;
+                }
+              });
+            } catch (e) {
+              console.log('[Productivity] SN init error:', e);
+              this.loadFromStorage();
             }
+          } else {
+            console.log('[Productivity] snApi not available, using localStorage');
+            this.loadFromStorage();
           }
           
-          // Detect dark mode preference
           if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
             this.darkMode = true;
           }
-          
-          // Load dark mode preference from storage
           var savedDarkMode = localStorage.getItem('sn-productivity-darkmode');
           if (savedDarkMode !== null) {
             this.darkMode = savedDarkMode === 'true';
           }
           
-          // Start timer update interval (every second for live display)
-          this.timerInterval = setInterval(() => {
-            this.timerTick++;
-          }, 1000);
+          this.timerInterval = setInterval(function() { self.timerTick++; }, 1000);
         },
         
-        // Storage
         loadFromStorage() {
           try {
             var saved = localStorage.getItem('sn-productivity-items');
@@ -1180,104 +802,78 @@
                 this.items = data.items;
               }
             }
-          } catch (e) {
-            console.error('Failed to load from storage:', e);
-          }
+          } catch (e) {}
         },
         
         saveToStorage() {
           try {
-            var data = { version: 1, items: this.items };
-            localStorage.setItem('sn-productivity-items', JSON.stringify(data));
-          } catch (e) {
-            console.error('Failed to save to storage:', e);
-          }
+            localStorage.setItem('sn-productivity-items', JSON.stringify({ version: 1, items: this.items }));
+          } catch (e) {}
         },
         
         save() {
           this.saveToStorage();
-          saveToSN();
+          if (window.snApi && this.inStandardNotes) {
+            try {
+              snApi.text = JSON.stringify({ version: 1, items: this.items });
+              snApi.preview = this.getPreview();
+            } catch (e) {
+              console.log('[Productivity] Save error:', e);
+            }
+          }
         },
         
-        // Preview for SN
         getPreview() {
-          var incomplete = this.items.filter(t => !t.done);
-          if (incomplete.length === 0) {
-            return this.items.length > 0 ? 'All tasks completed!' : 'No tasks';
-          }
-          var top = incomplete.slice(0, 3).map(t => '• ' + t.text).join('\n');
-          if (incomplete.length > 3) {
-            top += '\n... and ' + (incomplete.length - 3) + ' more';
-          }
+          var incomplete = this.items.filter(function(t) { return !t.done; });
+          if (incomplete.length === 0) return this.items.length > 0 ? 'All tasks completed!' : 'No tasks';
+          var top = incomplete.slice(0, 3).map(function(t) { return '• ' + t.text; }).join('\n');
+          if (incomplete.length > 3) top += '\n... and ' + (incomplete.length - 3) + ' more';
           return top;
         },
         
-        // Computed
+        toggleDarkMode() { this.darkMode = !this.darkMode; localStorage.setItem('sn-productivity-darkmode', this.darkMode.toString()); },
+        toggleSort() { this.sortBy = this.sortBy === 'weight' ? 'dueDate' : 'weight'; },
+        
         get sortedTasks() {
           var tasks = [...this.items];
+          var self = this;
+          var incomplete = tasks.filter(function(t) { return !t.done; });
+          var completed = tasks.filter(function(t) { return t.done; });
           
-          // Separate completed and incomplete
-          var incomplete = tasks.filter(t => !t.done);
-          var completed = tasks.filter(t => t.done);
-          
-          // Sort incomplete tasks
           if (this.sortBy === 'dueDate') {
-            incomplete.sort((a, b) => {
-              // No date goes last
+            incomplete.sort(function(a, b) {
               if (!a.dueDate && !b.dueDate) return b.weight - a.weight;
               if (!a.dueDate) return 1;
               if (!b.dueDate) return -1;
-              // Sort by date, then by weight
-              var dateCompare = a.dueDate.localeCompare(b.dueDate);
-              return dateCompare !== 0 ? dateCompare : b.weight - a.weight;
+              var d = a.dueDate.localeCompare(b.dueDate);
+              return d !== 0 ? d : b.weight - a.weight;
             });
           } else {
-            // Sort by weight (highest first)
-            incomplete.sort((a, b) => b.weight - a.weight);
+            incomplete.sort(function(a, b) { return b.weight - a.weight; });
           }
-          
-          // Sort completed by completedAt (most recent first)
-          completed.sort((a, b) => {
+          completed.sort(function(a, b) {
             if (!a.completedAt && !b.completedAt) return 0;
             if (!a.completedAt) return 1;
             if (!b.completedAt) return -1;
             return b.completedAt.localeCompare(a.completedAt);
           });
-          
-          return [...incomplete, ...completed];
+          return incomplete.concat(completed);
         },
         
-        get completedCount() {
-          return this.items.filter(t => t.done).length;
-        },
-        
+        get completedCount() { return this.items.filter(function(t) { return t.done; }).length; },
         get progressText() {
-          var done = this.items.filter(t => t.done).length;
-          var total = this.items.length;
-          if (total === 0) return '';
-          return done + '/' + total + ' done';
+          var done = this.items.filter(function(t) { return t.done; }).length;
+          return this.items.length === 0 ? '' : done + '/' + this.items.length + ' done';
         },
         
-        // Task actions
         addTask() {
           if (!this.newTaskText.trim() || this.locked) return;
-          
-          var task = {
-            id: genUUID(),
-            text: this.newTaskText.trim(),
-            weight: 3,
-            done: false,
-            status: this.defaultStatus,
-            subtasks: [],
-            dueDate: null,
-            estimatedMinutes: null,
-            trackedSeconds: 0,
-            timerStartedAt: null,
-            createdAt: new Date().toISOString(),
-            completedAt: null
-          };
-          
-          this.items.push(task);
+          this.items.push({
+            id: genUUID(), text: this.newTaskText.trim(), weight: 3, done: false,
+            status: this.defaultStatus, subtasks: [], dueDate: null,
+            estimatedMinutes: null, trackedSeconds: 0, timerStartedAt: null,
+            createdAt: new Date().toISOString(), completedAt: null
+          });
           this.newTaskText = '';
           this.save();
         },
@@ -1286,481 +882,141 @@
           if (this.locked) return;
           task.done = !task.done;
           task.completedAt = task.done ? new Date().toISOString() : null;
-          
-          // Sync status with done state
-          if (task.done) {
-            task.status = 'done';
-            if (task.timerStartedAt) this.stopTimer(task);
-          } else {
-            // Restore to default if was done
-            if (task.status === 'done') {
-              task.status = this.defaultStatus;
-            }
-          }
-          
+          if (task.done) { task.status = 'done'; if (task.timerStartedAt) this.stopTimer(task); }
+          else if (task.status === 'done') { task.status = this.defaultStatus; }
           this.save();
         },
         
         deleteTask(task) {
           if (this.locked) return;
-          var idx = this.items.findIndex(t => t.id === task.id);
-          if (idx !== -1) {
-            this.items.splice(idx, 1);
-            this.expandedTaskId = null;
-            this.save();
-          }
+          var idx = this.items.findIndex(function(t) { return t.id === task.id; });
+          if (idx !== -1) { this.items.splice(idx, 1); this.expandedTaskId = null; this.save(); }
         },
         
         startEditTask(task) {
           if (this.locked) return;
           this.editingTaskId = task.id;
           this.editingTaskText = task.text;
-          this.$nextTick(() => {
-            var input = this.$refs.editInput;
-            if (input) input.focus();
-          });
+          var self = this;
+          this.$nextTick(function() { var input = self.$refs.editInput; if (input) input.focus(); });
         },
         
         saveEditTask(task) {
-          if (this.editingTaskText.trim()) {
-            task.text = this.editingTaskText.trim();
-            this.save();
-          }
-          this.editingTaskId = null;
-          this.editingTaskText = '';
+          if (this.editingTaskText.trim()) { task.text = this.editingTaskText.trim(); this.save(); }
+          this.editingTaskId = null; this.editingTaskText = '';
         },
         
-        cancelEditTask() {
-          this.editingTaskId = null;
-          this.editingTaskText = '';
-        },
+        cancelEditTask() { this.editingTaskId = null; this.editingTaskText = ''; },
+        increaseWeight(task) { if (this.locked || task.weight >= 5) return; task.weight++; this.save(); },
+        decreaseWeight(task) { if (this.locked || task.weight <= 1) return; task.weight--; this.save(); },
+        toggleExpanded(task) { this.expandedTaskId = this.expandedTaskId === task.id ? null : task.id; this.newSubtaskText = ''; },
+        clearCompleted() { if (this.locked) return; this.items = this.items.filter(function(t) { return !t.done; }); this.save(); },
         
-        increaseWeight(task) {
-          if (this.locked || task.weight >= 5) return;
-          task.weight++;
-          this.save();
-        },
-        
-        decreaseWeight(task) {
-          if (this.locked || task.weight <= 1) return;
-          task.weight--;
-          this.save();
-        },
-        
-        toggleExpanded(task) {
-          this.expandedTaskId = this.expandedTaskId === task.id ? null : task.id;
-          this.newSubtaskText = '';
-        },
-        
-        clearCompleted() {
-          if (this.locked) return;
-          this.items = this.items.filter(t => !t.done);
-          this.save();
-        },
-        
-        // Subtasks
         addSubtask(task) {
           if (!this.newSubtaskText.trim() || this.locked) return;
-          
           if (!task.subtasks) task.subtasks = [];
-          
-          task.subtasks.push({
-            id: genUUID(),
-            text: this.newSubtaskText.trim(),
-            done: false
-          });
-          
+          task.subtasks.push({ id: genUUID(), text: this.newSubtaskText.trim(), done: false });
           this.newSubtaskText = '';
           this.save();
         },
         
-        toggleSubtask(task, subtask) {
-          if (this.locked) return;
-          subtask.done = !subtask.done;
-          this.save();
-        },
-        
+        toggleSubtask(task, subtask) { if (this.locked) return; subtask.done = !subtask.done; this.save(); },
         deleteSubtask(task, subtask) {
           if (this.locked) return;
-          var idx = task.subtasks.findIndex(s => s.id === subtask.id);
-          if (idx !== -1) {
-            task.subtasks.splice(idx, 1);
-            this.save();
-          }
+          var idx = task.subtasks.findIndex(function(s) { return s.id === subtask.id; });
+          if (idx !== -1) { task.subtasks.splice(idx, 1); this.save(); }
         },
         
         getSubtaskProgress(task) {
           if (!task.subtasks || task.subtasks.length === 0) return '';
-          var done = task.subtasks.filter(s => s.done).length;
-          return done + '/' + task.subtasks.length + ' subtasks';
+          return task.subtasks.filter(function(s) { return s.done; }).length + '/' + task.subtasks.length + ' subtasks';
         },
         
-        // Due dates
-        setDueDate(task, date) {
-          if (this.locked) return;
-          task.dueDate = date || null;
-          this.save();
-        },
+        setDueDate(task, date) { if (this.locked) return; task.dueDate = date || null; this.save(); },
         
         getDueDateClass(dueDate) {
           if (!dueDate) return '';
-          
-          var due = dayjs(dueDate);
-          var today = dayjs().startOf('day');
-          
-          if (due.isBefore(today)) {
-            return 'bg-red-500 text-white'; // Overdue
-          } else if (due.isToday()) {
-            return 'bg-orange-500 text-white'; // Today
-          } else if (due.isTomorrow()) {
-            return 'bg-yellow-500 text-white'; // Tomorrow
-          } else {
-            return 'bg-gray-300 dark:bg-gray-600 text-gray-700 dark:text-gray-200'; // Future
-          }
+          var due = dayjs(dueDate), today = dayjs().startOf('day');
+          if (due.isBefore(today)) return 'bg-red-500 text-white';
+          if (due.isToday()) return 'bg-orange-500 text-white';
+          if (due.isTomorrow()) return 'bg-yellow-500 text-white';
+          return 'bg-gray-300 dark:bg-gray-600 text-gray-700 dark:text-gray-200';
         },
         
         getDueDateText(dueDate) {
           if (!dueDate) return '';
-          
-          var due = dayjs(dueDate);
-          var today = dayjs().startOf('day');
-          
-          if (due.isBefore(today)) {
-            return 'Overdue: ' + due.format('MMM D');
-          } else if (due.isToday()) {
-            return 'Today';
-          } else if (due.isTomorrow()) {
-            return 'Tomorrow';
-          } else {
-            return due.format('MMM D');
-          }
-        },
-        
-        // Time tracking
-        parseTimeInput(input) {
-          if (!input || !input.trim()) return null;
-          
-          input = input.trim().toLowerCase();
-          var totalMinutes = 0;
-          
-          // Handle formats: "1:30", "1h30m", "1.5h", "90m", "90"
-          
-          // Format: "1:30" (hours:minutes)
-          var colonMatch = input.match(/^(\d+):(\d+)$/);
-          if (colonMatch) {
-            return parseInt(colonMatch[1]) * 60 + parseInt(colonMatch[2]);
-          }
-          
-          // Format: "1.5h" (decimal hours)
-          var decimalMatch = input.match(/^(\d+\.?\d*)h$/);
-          if (decimalMatch) {
-            return Math.round(parseFloat(decimalMatch[1]) * 60);
-          }
-          
-          // Format: "1h30m" or "1h" or "30m"
-          var hours = 0, minutes = 0;
-          var hourMatch = input.match(/(\d+)h/);
-          var minMatch = input.match(/(\d+)m/);
-          
-          if (hourMatch) hours = parseInt(hourMatch[1]);
-          if (minMatch) minutes = parseInt(minMatch[1]);
-          
-          if (hourMatch || minMatch) {
-            return hours * 60 + minutes;
-          }
-          
-          // Format: just a number (assume minutes)
-          var numMatch = input.match(/^(\d+)$/);
-          if (numMatch) {
-            return parseInt(numMatch[1]);
-          }
-          
-          return null;
-        },
-        
-        formatMinutesForInput(minutes) {
-          if (!minutes) return '';
-          
-          var h = Math.floor(minutes / 60);
-          var m = minutes % 60;
-          
-          if (h > 0 && m > 0) return h + 'h' + m + 'm';
-          if (h > 0) return h + 'h';
-          return m + 'm';
-        },
-        
-        formatSeconds(seconds) {
-          if (!seconds || seconds < 0) seconds = 0;
-          
-          var h = Math.floor(seconds / 3600);
-          var m = Math.floor((seconds % 3600) / 60);
-          var s = seconds % 60;
-          
-          // Pad with zeros for cleaner display
-          var parts = [];
-          if (h > 0) parts.push(h + 'h');
-          if (m > 0 || h > 0) parts.push(m + 'm');
-          parts.push(s + 's');
-          
-          return parts.join(' ');
-        },
-        
-        setEstimate(task, input) {
-          if (this.locked) return;
-          task.estimatedMinutes = this.parseTimeInput(input);
-          this.save();
-        },
-        
-        toggleTimer(task) {
-          if (this.locked) return;
-          
-          if (task.timerStartedAt) {
-            this.stopTimer(task);
-          } else {
-            this.startTimer(task);
-          }
+          var due = dayjs(dueDate), today = dayjs().startOf('day');
+          if (due.isBefore(today)) return 'Overdue: ' + due.format('MMM D');
+          if (due.isToday()) return 'Today';
+          if (due.isTomorrow()) return 'Tomorrow';
+          return due.format('MMM D');
         },
         
         startTimer(task) {
+          if (this.locked || task.done) return;
+          var running = this.items.find(function(t) { return t.timerStartedAt; });
+          if (running && running.id !== task.id) this.stopTimer(running);
           task.timerStartedAt = new Date().toISOString();
           this.save();
         },
         
         stopTimer(task) {
-          if (task.timerStartedAt) {
-            var started = new Date(task.timerStartedAt).getTime();
-            var elapsed = Math.floor((Date.now() - started) / 1000);
-            task.trackedSeconds = (task.trackedSeconds || 0) + elapsed;
-            task.timerStartedAt = null;
-            this.save();
-          }
-        },
-        
-        resetTimer(task) {
-          if (this.locked) return;
-          task.trackedSeconds = 0;
+          if (!task.timerStartedAt) return;
+          var elapsed = Math.floor((new Date() - new Date(task.timerStartedAt)) / 1000);
+          task.trackedSeconds = (task.trackedSeconds || 0) + elapsed;
           task.timerStartedAt = null;
           this.save();
         },
         
-        getCurrentTrackedSeconds(task) {
-          var base = task.trackedSeconds || 0;
-          if (task.timerStartedAt) {
-            var started = new Date(task.timerStartedAt).getTime();
-            var elapsed = Math.floor((Date.now() - started) / 1000);
-            return base + elapsed;
-          }
-          return base;
+        formatTrackedTime(task) {
+          var s = task.trackedSeconds || 0;
+          var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+          return h > 0 ? h + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0') : m + ':' + String(sec).padStart(2, '0');
         },
         
-        getTimeDisplay(task) {
-          var tracked = this.getCurrentTrackedSeconds(task);
-          var trackedStr = this.formatSeconds(tracked);
-          
-          if (task.estimatedMinutes) {
-            var estStr = this.formatMinutesForInput(task.estimatedMinutes);
-            return trackedStr + ' / ' + estStr;
-          }
-          
-          return trackedStr;
+        formatRunningTime(task) {
+          if (!task.timerStartedAt) return '';
+          var elapsed = Math.floor((new Date() - new Date(task.timerStartedAt)) / 1000);
+          var total = (task.trackedSeconds || 0) + elapsed;
+          var h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
+          return h > 0 ? h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') : m + ':' + String(s).padStart(2, '0');
         },
         
-        // UI
-        toggleSort() {
-          this.sortBy = this.sortBy === 'weight' ? 'dueDate' : 'weight';
-        },
-        
-        toggleDarkMode() {
-          this.darkMode = !this.darkMode;
-          localStorage.setItem('sn-productivity-darkmode', this.darkMode.toString());
-        },
-        
-        retryConnection() {
-          var self = this;
-          // More aggressive retry pattern for mobile
-          // Mobile React Native WebView can be slow to initialize
-          var attempts = [100, 300, 500, 800, 1200, 1800, 2500, 3500, 5000, 8000];
-          attempts.forEach(function(delay, index) {
-            setTimeout(function() {
-              if (!sessionKey) {
-                self.connectionAttempts++;
-                sendInitMessage();
-                // On mobile, also try triggering a custom event
-                if (isMobileDevice) {
-                  try {
-                    var readyEvent = new CustomEvent('sn-component-ready', {
-                      detail: { timestamp: Date.now() },
-                      bubbles: true
-                    });
-                    window.dispatchEvent(readyEvent);
-                  } catch (e) {}
-                }
-              }
-            }, delay);
-          });
-          
-          // Also poll for SN connection status periodically
-          var pollCount = 0;
-          var pollInterval = setInterval(function() {
-            pollCount++;
-            if (sessionKey || pollCount > 30) {
-              clearInterval(pollInterval);
-              return;
-            }
-            // Check if SN has injected any global data we might have missed
-            if (window.snComponentData || window.snSessionKey) {
-              if (window.snSessionKey && !sessionKey) {
-                sessionKey = window.snSessionKey;
-                self.inStandardNotes = true;
-                self.connectionAttempts = 0;
-              }
-              if (window.snComponentData) {
-                processIncomingMessage(window.snComponentData);
-              }
-            }
-          }, 500);
-        },
-        
-        // Debug methods
-        showDebugInfo() {
-          this.debugInfoVisible = !this.debugInfoVisible;
-          if (this.debugInfoVisible) {
-            // Enable console debug mode too
-            DEBUG_MODE = true;
-            console.log('[SN-Ext] Debug info shown');
-            console.log('[SN-Ext] Environment:', {
-              isInIframe: isInIframe,
-              isMobileDevice: isMobileDevice,
-              hasReactNative: hasReactNative,
-              hasWebkitHandlers: hasWebkitHandlers,
-              isAndroid: isAndroid,
-              isIOS: isIOS,
-              sessionKey: sessionKey ? 'present' : 'missing',
-              connectionAttempts: this.connectionAttempts
-            });
-          }
-        },
-        
-        forceRetry() {
-          this.connectionAttempts = 0;
-          sendInitMessage();
-          this.retryConnection();
-          console.log('[SN-Ext] Force retry initiated');
-        },
-        
-        getMessageCount() {
-          return allReceivedMessages.length;
-        },
-        
-        getRecentMessages() {
-          return allReceivedMessages.slice(-10).map(function(m) {
-            return m.time.split('T')[1].split('.')[0] + ' | ' + m.origin + ' | ' + m.raw;
-          }).reverse();
-        },
-        
-        copyDebugInfo() {
-          var info = {
-            timestamp: new Date().toISOString(),
-            userAgent: navigator.userAgent,
-            isInIframe: isInIframe,
-            isMobileDevice: isMobileDevice,
-            hasReactNative: hasReactNative,
-            hasWebkitHandlers: hasWebkitHandlers,
-            isAndroid: isAndroid,
-            isIOS: isIOS,
-            sessionKey: sessionKey ? 'present' : 'missing',
-            connectionAttempts: this.connectionAttempts,
-            messagesReceived: allReceivedMessages.length,
-            recentMessages: allReceivedMessages.slice(-20),
-            windowLocation: window.location.href,
-            parentOrigin: 'unknown'
-          };
-          try {
-            info.parentOrigin = window.parent.location.origin;
-          } catch(e) {
-            info.parentOrigin = 'cross-origin (cannot access)';
-          }
-          
-          var text = JSON.stringify(info, null, 2);
-          
-          // Try to copy to clipboard
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).then(function() {
-              alert('Debug info copied to clipboard!');
-            }).catch(function() {
-              console.log('[SN-Ext] Debug info:', text);
-              alert('Could not copy. Check console for debug info.');
-            });
-          } else {
-            console.log('[SN-Ext] Debug info:', text);
-            alert('Clipboard not available. Check console (if accessible) for debug info.');
-          }
-        },
-        
-        // Kanban methods
         getTasksByStatus(statusId) {
-          return this.items
-            .filter(t => (t.status || this.defaultStatus) === statusId)
-            .sort((a, b) => b.weight - a.weight);
-        },
-        
-        getStatusColor(statusId) {
-          var status = this.statuses.find(s => s.id === statusId);
-          return status ? status.color : '#64748b';
-        },
-        
-        getStatusLabel(statusId) {
-          var status = this.statuses.find(s => s.id === statusId);
-          return status ? status.label : statusId;
+          var self = this;
+          return this.items.filter(function(t) { return (t.status || self.defaultStatus) === statusId; })
+            .sort(function(a, b) { return b.weight - a.weight; });
         },
         
         setTaskStatus(task, statusId) {
           if (this.locked) return;
           task.status = statusId;
-          
-          // Sync done state with status
           if (statusId === 'done') {
             task.done = true;
             task.completedAt = task.completedAt || new Date().toISOString();
             if (task.timerStartedAt) this.stopTimer(task);
-          } else {
-            task.done = false;
-            task.completedAt = null;
-          }
-          
+          } else { task.done = false; task.completedAt = null; }
           this.save();
         },
         
-        // Drag and drop
-        draggedTask: null,
+        getColumnCount(statusId) {
+          var self = this;
+          return this.items.filter(function(t) { return (t.status || self.defaultStatus) === statusId; }).length;
+        },
         
+        draggedTask: null,
         onDragStart(event, task) {
           this.draggedTask = task;
           event.dataTransfer.effectAllowed = 'move';
           event.dataTransfer.setData('text/plain', task.id);
           event.target.style.opacity = '0.5';
         },
-        
-        onDragEnd(event) {
-          event.target.style.opacity = '1';
-          this.draggedTask = null;
-        },
-        
-        onDragOver(event) {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = 'move';
-        },
-        
+        onDragEnd(event) { event.target.style.opacity = '1'; this.draggedTask = null; },
+        onDragOver(event) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; },
         onDrop(event, statusId) {
           event.preventDefault();
-          if (this.draggedTask && !this.locked) {
-            this.setTaskStatus(this.draggedTask, statusId);
-          }
+          if (this.draggedTask && !this.locked) this.setTaskStatus(this.draggedTask, statusId);
           this.draggedTask = null;
-        },
-        
-        getColumnCount(statusId) {
-          return this.items.filter(t => (t.status || this.defaultStatus) === statusId).length;
         }
       };
     }
