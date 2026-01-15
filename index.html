@@ -1,0 +1,1281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Productivity Tool</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            sn: {
+              bg: 'var(--sn-stylekit-background-color, #ffffff)',
+              fg: 'var(--sn-stylekit-foreground-color, #000000)',
+              border: 'var(--sn-stylekit-border-color, #e5e5e5)',
+              info: 'var(--sn-stylekit-info-color, #086dd6)',
+              accent: 'var(--sn-stylekit-accent-color, #086dd6)',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  
+  <!-- Day.js for dates -->
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/relativeTime.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/isToday.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/isTomorrow.js"></script>
+  <script>
+    dayjs.extend(dayjs_plugin_relativeTime);
+    dayjs.extend(dayjs_plugin_isToday);
+    dayjs.extend(dayjs_plugin_isTomorrow);
+  </script>
+  
+  <!-- Alpine.js + Collapse plugin -->
+  <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  
+  <style>
+    /* Base styles */
+    * { box-sizing: border-box; }
+    html, body { 
+      margin: 0; 
+      padding: 0; 
+      height: 100%; 
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    
+    /* SN theme variable fallbacks */
+    :root {
+      --sn-stylekit-background-color: #ffffff;
+      --sn-stylekit-foreground-color: #1a1a1a;
+      --sn-stylekit-border-color: #e5e7eb;
+      --sn-stylekit-info-color: #3b82f6;
+      --sn-stylekit-accent-color: #3b82f6;
+      --sn-stylekit-contrast-background-color: #f3f4f6;
+    }
+    
+    .dark {
+      --sn-stylekit-background-color: #1a1a1a;
+      --sn-stylekit-foreground-color: #f5f5f5;
+      --sn-stylekit-border-color: #374151;
+      --sn-stylekit-info-color: #60a5fa;
+      --sn-stylekit-accent-color: #60a5fa;
+      --sn-stylekit-contrast-background-color: #262626;
+    }
+    
+    /* Scrollbar styling */
+    .custom-scroll::-webkit-scrollbar { width: 6px; }
+    .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+    .custom-scroll::-webkit-scrollbar-thumb { 
+      background: var(--sn-stylekit-border-color); 
+      border-radius: 3px; 
+    }
+    
+    /* Weight indicator colors */
+    .weight-1 { background: #94a3b8; }
+    .weight-2 { background: #60a5fa; }
+    .weight-3 { background: #fbbf24; }
+    .weight-4 { background: #fb923c; }
+    .weight-5 { background: #ef4444; }
+    
+    /* Timer pulse animation */
+    @keyframes pulse-timer {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    .timer-active { animation: pulse-timer 1.5s ease-in-out infinite; }
+    
+    /* Transitions */
+    .task-item { transition: all 0.2s ease; }
+    .task-item.completed { opacity: 0.6; }
+    
+    /* Input styling */
+    input[type="date"]::-webkit-calendar-picker-indicator {
+      filter: var(--date-picker-filter, none);
+    }
+    .dark input[type="date"]::-webkit-calendar-picker-indicator {
+      filter: invert(1);
+    }
+  </style>
+</head>
+<body>
+  <div id="app" x-data="productivityApp()" x-init="init()" 
+       :class="{ 'dark': darkMode }"
+       class="h-full flex flex-col"
+       style="background: var(--sn-stylekit-background-color); color: var(--sn-stylekit-foreground-color);">
+    
+    <!-- Header -->
+    <header class="flex-shrink-0 px-4 py-3 border-b" style="border-color: var(--sn-stylekit-border-color);">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <h1 class="text-lg font-semibold">Tasks</h1>
+          <span class="text-sm opacity-60" x-text="progressText"></span>
+        </div>
+        <div class="flex items-center gap-2">
+          <!-- View toggle -->
+          <div class="flex rounded-lg overflow-hidden border" style="border-color: var(--sn-stylekit-border-color);">
+            <button @click.prevent="viewMode = 'list'" 
+                    class="px-3 py-2 text-sm min-h-[44px] transition-colors"
+                    :style="viewMode === 'list' ? 'background: var(--sn-stylekit-accent-color); color: white;' : 'background: var(--sn-stylekit-contrast-background-color);'">
+              List
+            </button>
+            <button @click.prevent="viewMode = 'kanban'" 
+                    class="px-3 py-2 text-sm min-h-[44px] transition-colors"
+                    :style="viewMode === 'kanban' ? 'background: var(--sn-stylekit-accent-color); color: white;' : 'background: var(--sn-stylekit-contrast-background-color);'">
+              Kanban
+            </button>
+          </div>
+          
+          <!-- Sort toggle (list view only) -->
+          <button x-show="viewMode === 'list'" @click.prevent="toggleSort()" 
+                  class="p-2 rounded-lg hover:opacity-80 transition-opacity min-w-[44px] min-h-[44px] flex items-center justify-center"
+                  :title="sortBy === 'weight' ? 'Sort by due date' : 'Sort by weight'"
+                  style="background: var(--sn-stylekit-contrast-background-color);">
+            <svg x-show="sortBy === 'weight'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"/>
+            </svg>
+            <svg x-show="sortBy === 'dueDate'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+            </svg>
+          </button>
+          
+          <!-- Dark mode toggle (standalone only) -->
+          <button x-show="!inStandardNotes" @click.prevent="toggleDarkMode()" 
+                  class="p-2 rounded-lg hover:opacity-80 transition-opacity min-w-[44px] min-h-[44px] flex items-center justify-center"
+                  style="background: var(--sn-stylekit-contrast-background-color);">
+            <svg x-show="!darkMode" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+            </svg>
+            <svg x-show="darkMode" class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2.25a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM7.5 12a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM18.894 6.166a.75.75 0 00-1.06-1.06l-1.591 1.59a.75.75 0 101.06 1.061l1.591-1.59zM21.75 12a.75.75 0 01-.75.75h-2.25a.75.75 0 010-1.5H21a.75.75 0 01.75.75zM17.834 18.894a.75.75 0 001.06-1.06l-1.59-1.591a.75.75 0 10-1.061 1.06l1.59 1.591zM12 18a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-2.25A.75.75 0 0112 18zM7.758 17.303a.75.75 0 00-1.061-1.06l-1.591 1.59a.75.75 0 001.06 1.061l1.591-1.59zM6 12a.75.75 0 01-.75.75H3a.75.75 0 010-1.5h2.25A.75.75 0 016 12zM6.697 7.757a.75.75 0 001.06-1.06l-1.59-1.591a.75.75 0 00-1.061 1.06l1.59 1.591z"/>
+            </svg>
+          </button>
+          
+          <!-- Clear completed -->
+          <button x-show="completedCount > 0" @click.prevent="clearCompleted()" 
+                  class="px-3 py-2 text-sm rounded-lg hover:opacity-80 transition-opacity min-h-[44px]"
+                  style="background: var(--sn-stylekit-contrast-background-color);">
+            Clear done
+          </button>
+        </div>
+      </div>
+    </header>
+    
+    <!-- Task list view -->
+    <main x-show="viewMode === 'list'" class="flex-1 overflow-y-auto custom-scroll px-4 py-3">
+      <!-- Add task input -->
+      <div class="mb-4" x-show="!locked">
+        <div class="flex gap-2">
+          <input type="text" 
+                 x-model="newTaskText" 
+                 @keydown.enter.prevent="addTask()"
+                 placeholder="Add a task..."
+                 :disabled="locked"
+                 class="flex-1 px-4 py-3 rounded-lg border text-base min-h-[44px]"
+                 style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+          <button @click.prevent="addTask()" 
+                  :disabled="!newTaskText.trim() || locked"
+                  class="px-4 py-3 rounded-lg font-medium min-w-[44px] min-h-[44px] disabled:opacity-50"
+                  style="background: var(--sn-stylekit-accent-color); color: white;">
+            Add
+          </button>
+        </div>
+      </div>
+      
+      <!-- Locked indicator -->
+      <div x-show="locked" class="mb-4 px-4 py-3 rounded-lg text-sm opacity-70"
+           style="background: var(--sn-stylekit-contrast-background-color);">
+        🔒 This note is locked. Unlock to edit.
+      </div>
+      
+      <!-- Tasks -->
+      <div class="space-y-2">
+        <template x-for="task in sortedTasks" :key="task.id">
+          <div class="task-item rounded-lg border overflow-hidden"
+               :class="{ 'completed': task.done }"
+               style="border-color: var(--sn-stylekit-border-color);">
+            
+            <!-- Main task row -->
+            <div class="flex items-start gap-3 p-3" style="background: var(--sn-stylekit-background-color);">
+              <!-- Checkbox -->
+              <button @click.prevent="toggleTask(task)" 
+                      :disabled="locked"
+                      class="flex-shrink-0 w-11 h-11 flex items-center justify-center"
+                      >
+                <span class="w-6 h-6 rounded border-2 flex items-center justify-center"
+                      :style="task.done ? 'background: var(--sn-stylekit-accent-color); border-color: var(--sn-stylekit-accent-color);' : 'border-color: var(--sn-stylekit-border-color);'">
+                  <svg x-show="task.done" class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                  </svg>
+                </span>
+              </button>
+              
+              <!-- Task content -->
+              <div class="flex-1 min-w-0">
+                <!-- Task text / edit -->
+                <div class="flex items-start gap-2">
+                  <template x-if="editingTaskId !== task.id">
+                    <span @click.prevent="startEditTask(task)" 
+                          class="flex-1 cursor-pointer py-1"
+                          :class="{ 'line-through opacity-60': task.done }"
+                          x-text="task.text"></span>
+                  </template>
+                  <template x-if="editingTaskId === task.id">
+                    <input type="text" 
+                           x-model="editingTaskText"
+                           @keydown.enter.prevent="saveEditTask(task)"
+                           @keydown.escape.prevent="cancelEditTask()"
+                           @blur="saveEditTask(task)"
+                           x-ref="editInput"
+                           class="flex-1 px-2 py-1 rounded border text-base"
+                           style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                  </template>
+                  
+                  <!-- Weight badge -->
+                  <div class="flex-shrink-0 flex items-center gap-2">
+                    <button @click.prevent="decreaseWeight(task)" 
+                            :disabled="locked || task.weight <= 1"
+                            class="w-8 h-8 rounded text-white text-sm font-bold disabled:opacity-30 flex items-center justify-center"
+                            :class="'weight-' + task.weight">
+                      −
+                    </button>
+                    <span class="w-7 h-7 rounded text-white text-xs font-bold flex items-center justify-center"
+                          :class="'weight-' + task.weight"
+                          x-text="task.weight"></span>
+                    <button @click.prevent="increaseWeight(task)" 
+                            :disabled="locked || task.weight >= 5"
+                            class="w-8 h-8 rounded text-white text-sm font-bold disabled:opacity-30 flex items-center justify-center"
+                            :class="'weight-' + task.weight">
+                      +
+                    </button>
+                  </div>
+                </div>
+                
+                <!-- Due date & time badges -->
+                <div class="flex flex-wrap items-center gap-2 mt-2 text-sm">
+                  <!-- Status badge -->
+                  <span class="px-2 py-0.5 rounded text-xs font-medium text-white"
+                        :style="'background: ' + getStatusColor(task.status || defaultStatus)"
+                        x-text="getStatusLabel(task.status || defaultStatus)"></span>
+                  
+                  <!-- Due date badge -->
+                  <template x-if="task.dueDate">
+                    <span class="px-2 py-0.5 rounded text-xs font-medium"
+                          :class="getDueDateClass(task.dueDate)"
+                          x-text="getDueDateText(task.dueDate)"></span>
+                  </template>
+                  
+                  <!-- Time tracking badge -->
+                  <template x-if="task.estimatedMinutes || task.trackedSeconds || task.timerStartedAt">
+                    <span class="px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1"
+                          :class="task.timerStartedAt ? 'bg-green-500 text-white timer-active' : 'bg-gray-200 dark:bg-gray-700'"
+                          style="background: var(--sn-stylekit-contrast-background-color);">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                      </svg>
+                      <span x-text="getTimeDisplay(task)"></span>
+                    </span>
+                  </template>
+                  
+                  <!-- Subtask count -->
+                  <template x-if="task.subtasks && task.subtasks.length > 0">
+                    <span class="text-xs opacity-60" 
+                          x-text="getSubtaskProgress(task)"></span>
+                  </template>
+                </div>
+              </div>
+              
+              <!-- Expand/collapse button -->
+              <button @click.prevent="toggleExpanded(task)" 
+                      class="flex-shrink-0 w-11 h-11 rounded hover:opacity-80 flex items-center justify-center">
+                <svg class="w-5 h-5 transition-transform" 
+                     :class="{ 'rotate-180': expandedTaskId === task.id }"
+                     fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+              </button>
+            </div>
+            
+            <!-- Expanded details -->
+            <div x-show="expandedTaskId === task.id" 
+                 x-collapse
+                 class="border-t px-4 py-3 space-y-4"
+                 style="background: var(--sn-stylekit-contrast-background-color); border-color: var(--sn-stylekit-border-color);">
+              
+              <!-- Status dropdown -->
+              <div class="flex items-center gap-3">
+                <label class="text-sm font-medium w-20">Status:</label>
+                <select @change.prevent="setTaskStatus(task, $event.target.value)"
+                        :disabled="locked"
+                        class="flex-1 px-3 py-2 rounded border text-sm min-h-[44px]"
+                        style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                  <template x-for="s in statuses" :key="s.id">
+                    <option :value="s.id" 
+                            :selected="(task.status || defaultStatus) === s.id"
+                            x-text="s.label"></option>
+                  </template>
+                </select>
+              </div>
+              
+              <!-- Due date input -->
+              <div class="flex items-center gap-3">
+                <label class="text-sm font-medium w-20">Due:</label>
+                <input type="date" 
+                       :value="task.dueDate || ''"
+                       @change.prevent="setDueDate(task, $event.target.value)"
+                       :disabled="locked"
+                       class="flex-1 px-3 py-2 rounded border text-sm min-h-[44px]"
+                       style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                <button x-show="task.dueDate" @click.prevent="setDueDate(task, null)" 
+                        :disabled="locked"
+                        class="px-2 py-2 text-sm opacity-60 hover:opacity-100 min-w-[44px] min-h-[44px]">
+                  Clear
+                </button>
+              </div>
+              
+              <!-- Time estimate input -->
+              <div class="flex items-center gap-3">
+                <label class="text-sm font-medium w-20">Estimate:</label>
+                <input type="text" 
+                       :value="formatMinutesForInput(task.estimatedMinutes)"
+                       @blur="setEstimate(task, $event.target.value)"
+                       @keydown.enter.prevent="setEstimate(task, $event.target.value); $event.target.blur()"
+                       :disabled="locked"
+                       placeholder="e.g. 30m, 1h, 1h30m"
+                       class="flex-1 px-3 py-2 rounded border text-sm min-h-[44px]"
+                       style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+              </div>
+              
+              <!-- Timer controls -->
+              <div class="flex items-center gap-3">
+                <label class="text-sm font-medium w-20">Timer:</label>
+                <div class="flex-1 flex items-center gap-3">
+                  <button @click.prevent="toggleTimer(task)" 
+                          :disabled="locked"
+                          class="px-4 py-2 rounded font-medium text-sm min-h-[44px]"
+                          :class="task.timerStartedAt ? 'bg-red-500 text-white' : 'bg-green-500 text-white'">
+                    <span x-text="task.timerStartedAt ? 'Stop' : 'Start'"></span>
+                  </button>
+                  <span class="text-sm" x-text="'Tracked: ' + formatSeconds(getCurrentTrackedSeconds(task))"></span>
+                  <button x-show="task.trackedSeconds > 0 || task.timerStartedAt" 
+                          @click.prevent="resetTimer(task)"
+                          :disabled="locked"
+                          class="px-2 py-2 text-sm opacity-60 hover:opacity-100 min-w-[44px] min-h-[44px]">
+                    Reset
+                  </button>
+                </div>
+              </div>
+              
+              <!-- Subtasks -->
+              <div>
+                <div class="flex items-center gap-3 mb-2">
+                  <label class="text-sm font-medium w-20">Subtasks:</label>
+                  <div class="flex-1 flex gap-2" x-show="!locked">
+                    <input type="text" 
+                           x-model="newSubtaskText"
+                           @keydown.enter.prevent="addSubtask(task)"
+                           placeholder="Add subtask..."
+                           class="flex-1 px-3 py-2 rounded border text-sm min-h-[44px]"
+                           style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                    <button @click.prevent="addSubtask(task)" 
+                            :disabled="!newSubtaskText.trim()"
+                            class="px-3 py-2 rounded text-sm font-medium disabled:opacity-50 min-h-[44px]"
+                            style="background: var(--sn-stylekit-accent-color); color: white;">
+                      Add
+                    </button>
+                  </div>
+                </div>
+                
+                <!-- Subtask list -->
+                <div class="space-y-1 ml-20" x-show="task.subtasks && task.subtasks.length > 0">
+                  <template x-for="subtask in task.subtasks" :key="subtask.id">
+                    <div class="flex items-center gap-2 py-1">
+                      <button @click.prevent="toggleSubtask(task, subtask)" 
+                              :disabled="locked"
+                              class="w-9 h-9 flex-shrink-0 flex items-center justify-center">
+                        <span class="w-5 h-5 rounded border flex items-center justify-center"
+                              :style="subtask.done ? 'background: var(--sn-stylekit-accent-color); border-color: var(--sn-stylekit-accent-color);' : 'border-color: var(--sn-stylekit-border-color);'">
+                          <svg x-show="subtask.done" class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                          </svg>
+                        </span>
+                      </button>
+                      <span class="flex-1 text-sm" 
+                            :class="{ 'line-through opacity-60': subtask.done }"
+                            x-text="subtask.text"></span>
+                      <button @click.prevent="deleteSubtask(task, subtask)" 
+                              :disabled="locked"
+                              class="w-9 h-9 flex items-center justify-center opacity-40 hover:opacity-100">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </template>
+                </div>
+              </div>
+              
+              <!-- Delete task -->
+              <div class="pt-2 border-t flex justify-end" style="border-color: var(--sn-stylekit-border-color);">
+                <button @click.prevent="deleteTask(task)" 
+                        :disabled="locked"
+                        class="px-4 py-2 rounded text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 min-h-[44px]">
+                  Delete task
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+        
+        <!-- Empty state -->
+        <div x-show="items.length === 0" class="text-center py-12 opacity-50">
+          <p class="text-lg">No tasks yet</p>
+          <p class="text-sm mt-1">Add your first task above</p>
+        </div>
+      </div>
+    </main>
+    
+    <!-- Kanban view -->
+    <main x-show="viewMode === 'kanban'" class="flex-1 overflow-hidden flex flex-col">
+      <!-- Add task input for kanban -->
+      <div class="flex-shrink-0 px-4 py-3 border-b" x-show="!locked" style="border-color: var(--sn-stylekit-border-color);">
+        <div class="flex gap-2">
+          <input type="text" 
+                 x-model="newTaskText" 
+                 @keydown.enter.prevent="addTask()"
+                 placeholder="Add a task..."
+                 :disabled="locked"
+                 class="flex-1 px-4 py-3 rounded-lg border text-base min-h-[44px]"
+                 style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+          <button @click.prevent="addTask()" 
+                  :disabled="!newTaskText.trim() || locked"
+                  class="px-4 py-3 rounded-lg font-medium min-w-[44px] min-h-[44px] disabled:opacity-50"
+                  style="background: var(--sn-stylekit-accent-color); color: white;">
+            Add
+          </button>
+        </div>
+      </div>
+      
+      <!-- Kanban columns -->
+      <div class="flex-1 overflow-x-auto overflow-y-hidden">
+        <div class="flex gap-3 p-4 h-full min-w-max">
+          <template x-for="status in statuses" :key="status.id">
+            <div class="flex flex-col w-72 flex-shrink-0 rounded-lg overflow-hidden"
+                 style="background: var(--sn-stylekit-contrast-background-color);"
+                 @dragover.prevent="onDragOver($event)"
+                 @drop.prevent="onDrop($event, status.id)">
+              
+              <!-- Column header -->
+              <div class="flex items-center justify-between px-3 py-2 border-b"
+                   :style="'border-color: ' + status.color + '; border-bottom-width: 3px;'">
+                <span class="font-medium text-sm" x-text="status.label"></span>
+                <span class="text-xs opacity-60 px-2 py-0.5 rounded-full"
+                      style="background: var(--sn-stylekit-background-color);"
+                      x-text="getColumnCount(status.id)"></span>
+              </div>
+              
+              <!-- Column cards -->
+              <div class="flex-1 overflow-y-auto custom-scroll p-2 space-y-2">
+                <template x-for="task in getTasksByStatus(status.id)" :key="task.id">
+                  <div class="rounded-lg border p-3 cursor-move transition-shadow hover:shadow-md"
+                       style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color);"
+                       draggable="true"
+                       @dragstart="onDragStart($event, task)"
+                       @dragend="onDragEnd($event)">
+                    
+                    <!-- Card header: checkbox + text -->
+                    <div class="flex items-start gap-2">
+                      <button @click.prevent="toggleTask(task)" 
+                              :disabled="locked"
+                              class="flex-shrink-0 w-5 h-5 mt-0.5 rounded border flex items-center justify-center"
+                              :style="task.done ? 'background: var(--sn-stylekit-accent-color); border-color: var(--sn-stylekit-accent-color);' : 'border-color: var(--sn-stylekit-border-color);'">
+                        <svg x-show="task.done" class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                        </svg>
+                      </button>
+                      <span class="flex-1 text-sm leading-tight"
+                            :class="{ 'line-through opacity-60': task.done }"
+                            x-text="task.text"></span>
+                    </div>
+                    
+                    <!-- Card badges -->
+                    <div class="flex flex-wrap items-center gap-1.5 mt-2" x-show="task.dueDate || task.estimatedMinutes || task.trackedSeconds || task.timerStartedAt || (task.subtasks && task.subtasks.length > 0)">
+                      <!-- Weight -->
+                      <span class="w-5 h-5 rounded text-white text-xs font-bold flex items-center justify-center"
+                            :class="'weight-' + task.weight"
+                            x-text="task.weight"></span>
+                      
+                      <!-- Due date -->
+                      <template x-if="task.dueDate">
+                        <span class="px-1.5 py-0.5 rounded text-xs font-medium"
+                              :class="getDueDateClass(task.dueDate)"
+                              x-text="getDueDateText(task.dueDate)"></span>
+                      </template>
+                      
+                      <!-- Time tracking -->
+                      <template x-if="task.estimatedMinutes || task.trackedSeconds || task.timerStartedAt">
+                        <span class="px-1.5 py-0.5 rounded text-xs font-medium flex items-center gap-1"
+                              :class="task.timerStartedAt ? 'bg-green-500 text-white timer-active' : ''"
+                              :style="!task.timerStartedAt ? 'background: var(--sn-stylekit-border-color);' : ''">
+                          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                          </svg>
+                          <span x-text="getTimeDisplay(task)"></span>
+                        </span>
+                      </template>
+                      
+                      <!-- Subtasks -->
+                      <template x-if="task.subtasks && task.subtasks.length > 0">
+                        <span class="text-xs opacity-60" x-text="getSubtaskProgress(task)"></span>
+                      </template>
+                    </div>
+                    
+                    <!-- Quick actions -->
+                    <div class="flex items-center justify-between mt-2 pt-2 border-t" style="border-color: var(--sn-stylekit-border-color);">
+                      <button @click.prevent="toggleTimer(task)"
+                              :disabled="locked"
+                              class="text-xs px-2 py-1 rounded hover:opacity-80"
+                              :class="task.timerStartedAt ? 'bg-red-500 text-white' : 'bg-green-500 text-white'">
+                        <span x-text="task.timerStartedAt ? 'Stop' : 'Start'"></span>
+                      </button>
+                      <button @click.prevent="viewMode = 'list'; expandedTaskId = task.id;"
+                              class="text-xs px-2 py-1 rounded opacity-60 hover:opacity-100"
+                              style="background: var(--sn-stylekit-border-color);">
+                        Edit
+                      </button>
+                    </div>
+                  </div>
+                </template>
+                
+                <!-- Empty column state -->
+                <div x-show="getTasksByStatus(status.id).length === 0" 
+                     class="text-center py-8 opacity-40 text-sm">
+                  Drop tasks here
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <script>
+    // ========================================
+    // KANBAN CONFIGURATION - Edit these to customize
+    // ========================================
+    const STATUSES = [
+      { id: 'backlog', label: 'Backlog', color: '#64748b' },
+      { id: 'scheduled', label: 'Scheduled', color: '#0ea5e9' },
+      { id: 'ready', label: 'Ready', color: '#3b82f6' },
+      { id: 'inprogress', label: 'In Progress', color: '#f59e0b' },
+      { id: 'blocked', label: 'Blocked', color: '#ef4444' },
+      { id: 'review', label: 'In Review', color: '#8b5cf6' },
+      { id: 'waiting', label: 'Waiting / Pending', color: '#ec4899' },
+      { id: 'done', label: 'Done', color: '#22c55e' },
+      { id: 'someday', label: 'Someday / Parked', color: '#78716c' },
+    ];
+    
+    const DEFAULT_STATUS = 'backlog';  // New tasks get this status
+    
+    // ========================================
+    // STANDARD NOTES SYNC CODE (PROVEN - DO NOT MODIFY)
+    // ========================================
+    
+    var sessionKey = null;
+    var lastNote = null;
+    var sentMessages = [];
+    var isMobile = false;
+
+    function genUUID() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+    }
+
+    function postMessage(action, data, callback) {
+      var msgId = genUUID();
+      var msg = {
+        action: action,
+        data: data,
+        messageId: msgId,
+        sessionKey: sessionKey,
+        api: 'component'
+      };
+
+      if (callback) {
+        sentMessages.push({ messageId: msgId, callback: callback });
+      }
+
+      var toSend = isMobile ? JSON.stringify(msg) : msg;
+      window.parent.postMessage(toSend, '*');
+    }
+
+    function saveToSN() {
+      if (!lastNote || !sessionKey) return;
+
+      var text = JSON.stringify({ version: 1, items: window.appInstance.items });
+      lastNote.content.text = text;
+      lastNote.content.preview_plain = window.appInstance.getPreview();
+
+      var itemCopy = JSON.parse(JSON.stringify(lastNote));
+      delete itemCopy.children;
+      delete itemCopy.parent;
+
+      postMessage('save-items', { items: [itemCopy] });
+    }
+
+    function handleMessage(event) {
+      var data = event.data;
+      if (typeof data === 'string') {
+        try { data = JSON.parse(data); } catch (e) { return; }
+      }
+      if (!data || typeof data !== 'object') return;
+
+      if (data.action === 'component-registered') {
+        sessionKey = data.sessionKey;
+        if (data.data) {
+          if (data.data.environment === 'mobile') isMobile = true;
+        }
+        if (window.appInstance) {
+          window.appInstance.inStandardNotes = true;
+        }
+        postMessage('stream-context-item', {}, function(response) {
+          if (response && response.item) {
+            handleNote(response.item);
+          }
+        });
+        if (data.data && data.data.activeThemeUrls) {
+          activateThemes(data.data.activeThemeUrls);
+        }
+      }
+
+      if (data.action === 'themes') {
+        if (data.data && data.data.themes) {
+          activateThemes(data.data.themes);
+        }
+      }
+
+      if (data.original && data.original.messageId) {
+        for (var i = 0; i < sentMessages.length; i++) {
+          if (sentMessages[i].messageId === data.original.messageId) {
+            if (sentMessages[i].callback) {
+              sentMessages[i].callback(data.data);
+            }
+            sentMessages.splice(i, 1);
+            break;
+          }
+        }
+      }
+
+      if (data.action === 'stream-context-item' && data.data && data.data.item) {
+        handleNote(data.data.item);
+      }
+    }
+
+    function handleNote(note) {
+      if (!note) return;
+      if (note.isMetadataUpdate) return;
+
+      lastNote = note;
+      
+      var items = [];
+      if (note.content && note.content.text) {
+        items = parseData(note.content.text);
+      }
+
+      var locked = false;
+      if (note.content && note.content.appData && note.content.appData['org.standardnotes.sn']) {
+        locked = !!note.content.appData['org.standardnotes.sn'].locked;
+      }
+
+      if (window.appInstance) {
+        window.appInstance.items = items;
+        window.appInstance.locked = locked;
+      }
+    }
+
+    function parseData(text) {
+      try {
+        var data = JSON.parse(text);
+        if (data && data.version === 1 && Array.isArray(data.items)) {
+          return data.items;
+        }
+      } catch (e) {}
+      return [];
+    }
+
+    function activateThemes(urls) {
+      var oldThemes = document.querySelectorAll('.sn-theme');
+      for (var i = 0; i < oldThemes.length; i++) {
+        oldThemes[i].parentNode.removeChild(oldThemes[i]);
+      }
+
+      for (var j = 0; j < urls.length; j++) {
+        if (!urls[j]) continue;
+        var link = document.createElement('link');
+        link.className = 'sn-theme';
+        link.rel = 'stylesheet';
+        link.href = urls[j];
+        document.head.appendChild(link);
+      }
+    }
+
+    function initSN() {
+      window.addEventListener('message', handleMessage);
+
+      if (window.parent !== window) {
+        var initMsg = {
+          action: 'component-initialized',
+          messageId: genUUID(),
+          api: 'component'
+        };
+        window.parent.postMessage(initMsg, '*');
+      }
+    }
+    
+    // ========================================
+    // ALPINE.JS APP
+    // ========================================
+    
+    function productivityApp() {
+      return {
+        // State
+        items: [],
+        locked: false,
+        darkMode: false,
+        inStandardNotes: false,
+        sortBy: 'weight', // 'weight' or 'dueDate'
+        viewMode: 'list', // 'list' or 'kanban'
+        
+        // Kanban config (from global)
+        statuses: STATUSES,
+        defaultStatus: DEFAULT_STATUS,
+        
+        // UI state
+        newTaskText: '',
+        newSubtaskText: '',
+        editingTaskId: null,
+        editingTaskText: '',
+        expandedTaskId: null,
+        
+        // Timer tick (updates every second for live display)
+        timerTick: 0,
+        
+        // Timer update interval
+        timerInterval: null,
+        
+        // Initialize
+        init() {
+          window.appInstance = this;
+          
+          // Load from localStorage first
+          this.loadFromStorage();
+          
+          // Detect dark mode preference
+          if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            this.darkMode = true;
+          }
+          
+          // Load dark mode preference from storage
+          var savedDarkMode = localStorage.getItem('sn-productivity-darkmode');
+          if (savedDarkMode !== null) {
+            this.darkMode = savedDarkMode === 'true';
+          }
+          
+          // Initialize Standard Notes connection
+          initSN();
+          
+          // Start timer update interval (every second for live display)
+          this.timerInterval = setInterval(() => {
+            this.timerTick++;
+          }, 1000);
+        },
+        
+        // Storage
+        loadFromStorage() {
+          try {
+            var saved = localStorage.getItem('sn-productivity-items');
+            if (saved) {
+              var data = JSON.parse(saved);
+              if (data && data.version === 1 && Array.isArray(data.items)) {
+                this.items = data.items;
+              }
+            }
+          } catch (e) {
+            console.error('Failed to load from storage:', e);
+          }
+        },
+        
+        saveToStorage() {
+          try {
+            var data = { version: 1, items: this.items };
+            localStorage.setItem('sn-productivity-items', JSON.stringify(data));
+          } catch (e) {
+            console.error('Failed to save to storage:', e);
+          }
+        },
+        
+        save() {
+          this.saveToStorage();
+          saveToSN();
+        },
+        
+        // Preview for SN
+        getPreview() {
+          var incomplete = this.items.filter(t => !t.done);
+          if (incomplete.length === 0) {
+            return this.items.length > 0 ? 'All tasks completed!' : 'No tasks';
+          }
+          var top = incomplete.slice(0, 3).map(t => '• ' + t.text).join('\n');
+          if (incomplete.length > 3) {
+            top += '\n... and ' + (incomplete.length - 3) + ' more';
+          }
+          return top;
+        },
+        
+        // Computed
+        get sortedTasks() {
+          var tasks = [...this.items];
+          
+          // Separate completed and incomplete
+          var incomplete = tasks.filter(t => !t.done);
+          var completed = tasks.filter(t => t.done);
+          
+          // Sort incomplete tasks
+          if (this.sortBy === 'dueDate') {
+            incomplete.sort((a, b) => {
+              // No date goes last
+              if (!a.dueDate && !b.dueDate) return b.weight - a.weight;
+              if (!a.dueDate) return 1;
+              if (!b.dueDate) return -1;
+              // Sort by date, then by weight
+              var dateCompare = a.dueDate.localeCompare(b.dueDate);
+              return dateCompare !== 0 ? dateCompare : b.weight - a.weight;
+            });
+          } else {
+            // Sort by weight (highest first)
+            incomplete.sort((a, b) => b.weight - a.weight);
+          }
+          
+          // Sort completed by completedAt (most recent first)
+          completed.sort((a, b) => {
+            if (!a.completedAt && !b.completedAt) return 0;
+            if (!a.completedAt) return 1;
+            if (!b.completedAt) return -1;
+            return b.completedAt.localeCompare(a.completedAt);
+          });
+          
+          return [...incomplete, ...completed];
+        },
+        
+        get completedCount() {
+          return this.items.filter(t => t.done).length;
+        },
+        
+        get progressText() {
+          var done = this.items.filter(t => t.done).length;
+          var total = this.items.length;
+          if (total === 0) return '';
+          return done + '/' + total + ' done';
+        },
+        
+        // Task actions
+        addTask() {
+          if (!this.newTaskText.trim() || this.locked) return;
+          
+          var task = {
+            id: genUUID(),
+            text: this.newTaskText.trim(),
+            weight: 3,
+            done: false,
+            status: this.defaultStatus,
+            subtasks: [],
+            dueDate: null,
+            estimatedMinutes: null,
+            trackedSeconds: 0,
+            timerStartedAt: null,
+            createdAt: new Date().toISOString(),
+            completedAt: null
+          };
+          
+          this.items.push(task);
+          this.newTaskText = '';
+          this.save();
+        },
+        
+        toggleTask(task) {
+          if (this.locked) return;
+          task.done = !task.done;
+          task.completedAt = task.done ? new Date().toISOString() : null;
+          
+          // Sync status with done state
+          if (task.done) {
+            task.status = 'done';
+            if (task.timerStartedAt) this.stopTimer(task);
+          } else {
+            // Restore to default if was done
+            if (task.status === 'done') {
+              task.status = this.defaultStatus;
+            }
+          }
+          
+          this.save();
+        },
+        
+        deleteTask(task) {
+          if (this.locked) return;
+          var idx = this.items.findIndex(t => t.id === task.id);
+          if (idx !== -1) {
+            this.items.splice(idx, 1);
+            this.expandedTaskId = null;
+            this.save();
+          }
+        },
+        
+        startEditTask(task) {
+          if (this.locked) return;
+          this.editingTaskId = task.id;
+          this.editingTaskText = task.text;
+          this.$nextTick(() => {
+            var input = this.$refs.editInput;
+            if (input) input.focus();
+          });
+        },
+        
+        saveEditTask(task) {
+          if (this.editingTaskText.trim()) {
+            task.text = this.editingTaskText.trim();
+            this.save();
+          }
+          this.editingTaskId = null;
+          this.editingTaskText = '';
+        },
+        
+        cancelEditTask() {
+          this.editingTaskId = null;
+          this.editingTaskText = '';
+        },
+        
+        increaseWeight(task) {
+          if (this.locked || task.weight >= 5) return;
+          task.weight++;
+          this.save();
+        },
+        
+        decreaseWeight(task) {
+          if (this.locked || task.weight <= 1) return;
+          task.weight--;
+          this.save();
+        },
+        
+        toggleExpanded(task) {
+          this.expandedTaskId = this.expandedTaskId === task.id ? null : task.id;
+          this.newSubtaskText = '';
+        },
+        
+        clearCompleted() {
+          if (this.locked) return;
+          this.items = this.items.filter(t => !t.done);
+          this.save();
+        },
+        
+        // Subtasks
+        addSubtask(task) {
+          if (!this.newSubtaskText.trim() || this.locked) return;
+          
+          if (!task.subtasks) task.subtasks = [];
+          
+          task.subtasks.push({
+            id: genUUID(),
+            text: this.newSubtaskText.trim(),
+            done: false
+          });
+          
+          this.newSubtaskText = '';
+          this.save();
+        },
+        
+        toggleSubtask(task, subtask) {
+          if (this.locked) return;
+          subtask.done = !subtask.done;
+          this.save();
+        },
+        
+        deleteSubtask(task, subtask) {
+          if (this.locked) return;
+          var idx = task.subtasks.findIndex(s => s.id === subtask.id);
+          if (idx !== -1) {
+            task.subtasks.splice(idx, 1);
+            this.save();
+          }
+        },
+        
+        getSubtaskProgress(task) {
+          if (!task.subtasks || task.subtasks.length === 0) return '';
+          var done = task.subtasks.filter(s => s.done).length;
+          return done + '/' + task.subtasks.length + ' subtasks';
+        },
+        
+        // Due dates
+        setDueDate(task, date) {
+          if (this.locked) return;
+          task.dueDate = date || null;
+          this.save();
+        },
+        
+        getDueDateClass(dueDate) {
+          if (!dueDate) return '';
+          
+          var due = dayjs(dueDate);
+          var today = dayjs().startOf('day');
+          
+          if (due.isBefore(today)) {
+            return 'bg-red-500 text-white'; // Overdue
+          } else if (due.isToday()) {
+            return 'bg-orange-500 text-white'; // Today
+          } else if (due.isTomorrow()) {
+            return 'bg-yellow-500 text-white'; // Tomorrow
+          } else {
+            return 'bg-gray-300 dark:bg-gray-600 text-gray-700 dark:text-gray-200'; // Future
+          }
+        },
+        
+        getDueDateText(dueDate) {
+          if (!dueDate) return '';
+          
+          var due = dayjs(dueDate);
+          var today = dayjs().startOf('day');
+          
+          if (due.isBefore(today)) {
+            return 'Overdue: ' + due.format('MMM D');
+          } else if (due.isToday()) {
+            return 'Today';
+          } else if (due.isTomorrow()) {
+            return 'Tomorrow';
+          } else {
+            return due.format('MMM D');
+          }
+        },
+        
+        // Time tracking
+        parseTimeInput(input) {
+          if (!input || !input.trim()) return null;
+          
+          input = input.trim().toLowerCase();
+          var totalMinutes = 0;
+          
+          // Handle formats: "1:30", "1h30m", "1.5h", "90m", "90"
+          
+          // Format: "1:30" (hours:minutes)
+          var colonMatch = input.match(/^(\d+):(\d+)$/);
+          if (colonMatch) {
+            return parseInt(colonMatch[1]) * 60 + parseInt(colonMatch[2]);
+          }
+          
+          // Format: "1.5h" (decimal hours)
+          var decimalMatch = input.match(/^(\d+\.?\d*)h$/);
+          if (decimalMatch) {
+            return Math.round(parseFloat(decimalMatch[1]) * 60);
+          }
+          
+          // Format: "1h30m" or "1h" or "30m"
+          var hours = 0, minutes = 0;
+          var hourMatch = input.match(/(\d+)h/);
+          var minMatch = input.match(/(\d+)m/);
+          
+          if (hourMatch) hours = parseInt(hourMatch[1]);
+          if (minMatch) minutes = parseInt(minMatch[1]);
+          
+          if (hourMatch || minMatch) {
+            return hours * 60 + minutes;
+          }
+          
+          // Format: just a number (assume minutes)
+          var numMatch = input.match(/^(\d+)$/);
+          if (numMatch) {
+            return parseInt(numMatch[1]);
+          }
+          
+          return null;
+        },
+        
+        formatMinutesForInput(minutes) {
+          if (!minutes) return '';
+          
+          var h = Math.floor(minutes / 60);
+          var m = minutes % 60;
+          
+          if (h > 0 && m > 0) return h + 'h' + m + 'm';
+          if (h > 0) return h + 'h';
+          return m + 'm';
+        },
+        
+        formatSeconds(seconds) {
+          if (!seconds || seconds < 0) seconds = 0;
+          
+          var h = Math.floor(seconds / 3600);
+          var m = Math.floor((seconds % 3600) / 60);
+          var s = seconds % 60;
+          
+          // Pad with zeros for cleaner display
+          var parts = [];
+          if (h > 0) parts.push(h + 'h');
+          if (m > 0 || h > 0) parts.push(m + 'm');
+          parts.push(s + 's');
+          
+          return parts.join(' ');
+        },
+        
+        setEstimate(task, input) {
+          if (this.locked) return;
+          task.estimatedMinutes = this.parseTimeInput(input);
+          this.save();
+        },
+        
+        toggleTimer(task) {
+          if (this.locked) return;
+          
+          if (task.timerStartedAt) {
+            this.stopTimer(task);
+          } else {
+            this.startTimer(task);
+          }
+        },
+        
+        startTimer(task) {
+          task.timerStartedAt = new Date().toISOString();
+          this.save();
+        },
+        
+        stopTimer(task) {
+          if (task.timerStartedAt) {
+            var started = new Date(task.timerStartedAt).getTime();
+            var elapsed = Math.floor((Date.now() - started) / 1000);
+            task.trackedSeconds = (task.trackedSeconds || 0) + elapsed;
+            task.timerStartedAt = null;
+            this.save();
+          }
+        },
+        
+        resetTimer(task) {
+          if (this.locked) return;
+          task.trackedSeconds = 0;
+          task.timerStartedAt = null;
+          this.save();
+        },
+        
+        getCurrentTrackedSeconds(task) {
+          // Reference timerTick to trigger reactivity
+          var tick = this.timerTick;
+          
+          var base = task.trackedSeconds || 0;
+          if (task.timerStartedAt) {
+            var started = new Date(task.timerStartedAt).getTime();
+            var elapsed = Math.floor((Date.now() - started) / 1000);
+            return base + elapsed;
+          }
+          return base;
+        },
+        
+        getTimeDisplay(task) {
+          var tracked = this.getCurrentTrackedSeconds(task);
+          var trackedStr = this.formatSeconds(tracked);
+          
+          if (task.estimatedMinutes) {
+            var estStr = this.formatMinutesForInput(task.estimatedMinutes);
+            return trackedStr + ' / ' + estStr;
+          }
+          
+          return trackedStr;
+        },
+        
+        // UI
+        toggleSort() {
+          this.sortBy = this.sortBy === 'weight' ? 'dueDate' : 'weight';
+        },
+        
+        toggleDarkMode() {
+          this.darkMode = !this.darkMode;
+          localStorage.setItem('sn-productivity-darkmode', this.darkMode.toString());
+        },
+        
+        // Kanban methods
+        getTasksByStatus(statusId) {
+          return this.items
+            .filter(t => (t.status || this.defaultStatus) === statusId)
+            .sort((a, b) => b.weight - a.weight);
+        },
+        
+        getStatusColor(statusId) {
+          var status = this.statuses.find(s => s.id === statusId);
+          return status ? status.color : '#64748b';
+        },
+        
+        getStatusLabel(statusId) {
+          var status = this.statuses.find(s => s.id === statusId);
+          return status ? status.label : statusId;
+        },
+        
+        setTaskStatus(task, statusId) {
+          if (this.locked) return;
+          task.status = statusId;
+          
+          // Sync done state with status
+          if (statusId === 'done') {
+            task.done = true;
+            task.completedAt = task.completedAt || new Date().toISOString();
+            if (task.timerStartedAt) this.stopTimer(task);
+          } else {
+            task.done = false;
+            task.completedAt = null;
+          }
+          
+          this.save();
+        },
+        
+        // Drag and drop
+        draggedTask: null,
+        
+        onDragStart(event, task) {
+          this.draggedTask = task;
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', task.id);
+          event.target.style.opacity = '0.5';
+        },
+        
+        onDragEnd(event) {
+          event.target.style.opacity = '1';
+          this.draggedTask = null;
+        },
+        
+        onDragOver(event) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+        },
+        
+        onDrop(event, statusId) {
+          event.preventDefault();
+          if (this.draggedTask && !this.locked) {
+            this.setTaskStatus(this.draggedTask, statusId);
+          }
+          this.draggedTask = null;
+        },
+        
+        getColumnCount(statusId) {
+          return this.items.filter(t => (t.status || this.defaultStatus) === statusId).length;
+        }
+      };
+    }
+  </script>
+</body>
+</html>
