@@ -78,12 +78,12 @@
       border-radius: 3px; 
     }
     
-    /* Weight indicator colors */
-    .weight-1 { background: #94a3b8; }
-    .weight-2 { background: #60a5fa; }
-    .weight-3 { background: #fbbf24; }
-    .weight-4 { background: #fb923c; }
-    .weight-5 { background: #ef4444; }
+    /* Weight indicator colors - more prominent */
+    .weight-1 { background: linear-gradient(180deg, #94a3b8, #64748b); box-shadow: 0 0 4px rgba(148, 163, 184, 0.5); }
+    .weight-2 { background: linear-gradient(180deg, #60a5fa, #3b82f6); box-shadow: 0 0 4px rgba(96, 165, 250, 0.5); }
+    .weight-3 { background: linear-gradient(180deg, #fbbf24, #f59e0b); box-shadow: 0 0 4px rgba(251, 191, 36, 0.5); }
+    .weight-4 { background: linear-gradient(180deg, #fb923c, #ea580c); box-shadow: 0 0 4px rgba(251, 146, 60, 0.5); }
+    .weight-5 { background: linear-gradient(180deg, #f87171, #dc2626); box-shadow: 0 0 6px rgba(239, 68, 68, 0.6); }
     
     /* Timer pulse animation */
     @keyframes pulse-timer {
@@ -482,6 +482,11 @@
                     :style="viewMode === 'kanban' ? 'background: var(--sn-stylekit-accent-color); color: white;' : 'background: var(--sn-stylekit-contrast-background-color);'">
               Kanban
             </button>
+            <button @click.prevent="viewMode = 'matrix'" 
+                    class="px-3 py-2 text-sm min-h-[44px] transition-colors"
+                    :style="viewMode === 'matrix' ? 'background: var(--sn-stylekit-accent-color); color: white;' : 'background: var(--sn-stylekit-contrast-background-color);'">
+              Matrix
+            </button>
           </div>
           
           <button x-show="viewMode === 'list'" @click.prevent="toggleSort()" 
@@ -551,7 +556,9 @@
                 </svg>
               </button>
               
-              <div class="flex-shrink-0 w-2 h-8 rounded-full" :class="'weight-' + task.weight"></div>
+              <div class="flex-shrink-0 w-1.5 rounded-full shadow-sm" 
+                   style="min-height: 2.5rem;"
+                   :class="'weight-' + task.weight"></div>
               
               <div class="flex-1 min-w-0">
                 <template x-if="editingTaskId !== task.id">
@@ -574,8 +581,15 @@
               
               <div x-show="task.timerStartedAt" 
                    class="flex-shrink-0 text-sm font-mono timer-active"
-                   style="color: var(--sn-stylekit-accent-color);"
-                   x-text="formatRunningTime(task)"></div>
+                   style="color: var(--sn-stylekit-accent-color);">
+                <span x-text="(timerTick, formatRunningTime(task))"></span><span x-show="task.estimatedMinutes" class="opacity-70">/<span x-text="formatEstimate(task)"></span></span>
+              </div>
+              
+              <!-- Time tracking display (when not running but has time) -->
+              <div x-show="!task.timerStartedAt && (task.trackedSeconds > 0 || task.estimatedMinutes)"
+                   class="flex-shrink-0 text-xs font-mono opacity-70">
+                <span x-text="formatTrackedTime(task)"></span><span x-show="task.estimatedMinutes">/<span x-text="formatEstimate(task)"></span> est.</span>
+              </div>
               
               <div x-show="task.dueDate && !task.done" 
                    class="flex-shrink-0 text-xs px-2 py-1 rounded"
@@ -585,6 +599,18 @@
               <div x-show="task.subtasks && task.subtasks.length > 0" 
                    class="flex-shrink-0 text-xs opacity-60"
                    x-text="getSubtaskProgress(task)"></div>
+              
+              <!-- Status badge -->
+              <div x-show="!task.done && (task.status || defaultStatus) !== 'backlog'"
+                   class="flex-shrink-0 text-xs px-2 py-1 rounded text-white"
+                   :style="'background: ' + getStatusColor(task.status || defaultStatus)"
+                   x-text="getStatusLabel(task.status || defaultStatus)"></div>
+              
+              <!-- Quadrant badge -->
+              <div x-show="task.quadrant"
+                   class="flex-shrink-0 text-xs px-2 py-1 rounded text-white"
+                   :style="'background: ' + getQuadrantColor(task.quadrant)"
+                   x-text="getQuadrantLabel(task.quadrant)"></div>
               
               <button @click.prevent="toggleExpanded(task)" 
                       class="flex-shrink-0 p-1 rounded hover:opacity-80 min-w-[32px] min-h-[32px] flex items-center justify-center"
@@ -598,6 +624,40 @@
             </div>
             
             <div x-show="expandedTaskId === task.id" x-collapse class="mt-3 pt-3 border-t" style="border-color: var(--sn-stylekit-border-color);">
+              <!-- Status selector -->
+              <div class="flex items-center gap-2 mb-3 flex-wrap">
+                <span class="text-sm opacity-60">Status:</span>
+                <div class="flex flex-wrap gap-1">
+                  <template x-for="status in statuses" :key="status.id">
+                    <button @click.prevent="setTaskStatus(task, status.id)" :disabled="locked"
+                            class="px-2 py-1 rounded text-xs min-h-[28px] transition-all"
+                            :style="(task.status || defaultStatus) === status.id 
+                              ? 'background: ' + status.color + '; color: white;' 
+                              : 'background: var(--sn-stylekit-contrast-background-color); opacity: 0.7;'"
+                            x-text="status.label"></button>
+                  </template>
+                </div>
+              </div>
+              
+              <!-- Eisenhower Quadrant selector -->
+              <div class="flex items-center gap-2 mb-3 flex-wrap">
+                <span class="text-sm opacity-60">Quadrant:</span>
+                <div class="flex flex-wrap gap-1">
+                  <template x-for="quad in quadrants" :key="quad.id">
+                    <button @click.prevent="setTaskQuadrant(task, quad.id)" :disabled="locked"
+                            class="px-2 py-1 rounded text-xs min-h-[28px] transition-all"
+                            :style="task.quadrant === quad.id 
+                              ? 'background: ' + quad.color + '; color: white;' 
+                              : 'background: var(--sn-stylekit-contrast-background-color); opacity: 0.7;'"
+                            x-text="quad.label"></button>
+                  </template>
+                  <button x-show="task.quadrant" @click.prevent="setTaskQuadrant(task, null)" :disabled="locked"
+                          class="px-2 py-1 rounded text-xs min-h-[28px] opacity-60 hover:opacity-100"
+                          style="background: var(--sn-stylekit-contrast-background-color);">Clear</button>
+                </div>
+              </div>
+              
+              <!-- Priority -->
               <div class="flex items-center gap-2 mb-3">
                 <span class="text-sm opacity-60">Priority:</span>
                 <button @click.prevent="decreaseWeight(task)" :disabled="locked || task.weight <= 1"
@@ -609,6 +669,7 @@
                         style="background: var(--sn-stylekit-contrast-background-color);">+</button>
               </div>
               
+              <!-- Due date -->
               <div class="flex items-center gap-2 mb-3">
                 <span class="text-sm opacity-60">Due:</span>
                 <input type="date" :value="task.dueDate" @change="setDueDate(task, $event.target.value)" :disabled="locked"
@@ -618,13 +679,31 @@
                         class="text-xs opacity-60 hover:opacity-100 min-w-[32px] min-h-[32px]">Clear</button>
               </div>
               
+              <!-- Time tracking -->
               <div class="flex items-center gap-2 mb-3">
                 <span class="text-sm opacity-60">Time:</span>
-                <span class="font-mono text-sm" x-text="formatTrackedTime(task)"></span>
+                <span x-show="!task.timerStartedAt" class="font-mono text-sm" x-text="formatTrackedTime(task)"></span>
+                <span x-show="task.timerStartedAt" class="font-mono text-sm timer-active" style="color: var(--sn-stylekit-accent-color);" x-text="(timerTick, formatRunningTime(task))"></span>
+                <template x-if="task.estimatedMinutes">
+                  <span class="text-sm opacity-60">/ <span x-text="formatEstimate(task)"></span> est.</span>
+                </template>
                 <button x-show="!task.timerStartedAt && !task.done" @click.prevent="startTimer(task)" :disabled="locked"
                         class="px-2 py-1 rounded text-xs min-h-[28px]" style="background: var(--sn-stylekit-accent-color); color: white;">Start</button>
                 <button x-show="task.timerStartedAt" @click.prevent="stopTimer(task)"
                         class="px-2 py-1 rounded text-xs min-h-[28px]" style="background: #ef4444; color: white;">Stop</button>
+              </div>
+              
+              <!-- Estimate -->
+              <div class="flex items-center gap-2 mb-3">
+                <span class="text-sm opacity-60">Estimate:</span>
+                <input type="text" 
+                       :value="formatEstimate(task)"
+                       @blur="setEstimate(task, $event.target.value)"
+                       @keydown.enter.prevent="$event.target.blur()"
+                       :disabled="locked"
+                       placeholder="e.g. 1h30m, 90m, 1:30"
+                       class="px-2 py-1 rounded border text-sm w-32 min-h-[32px]"
+                       style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
               </div>
               
               <div class="mb-3">
@@ -702,16 +781,87 @@
         </template>
       </div>
     </main>
+    
+    <!-- Eisenhower Matrix view -->
+    <main x-show="viewMode === 'matrix'" class="flex-1 overflow-auto custom-scroll p-4">
+      <div class="grid grid-cols-2 grid-rows-2 gap-3 h-full min-h-[500px]">
+        <template x-for="quad in quadrants" :key="quad.id">
+          <div class="rounded-lg border-2 flex flex-col overflow-hidden"
+               :style="'border-color: ' + quad.color + '; background: ' + quad.bg"
+               @dragover.prevent="onDragOver($event)"
+               @drop.prevent="onDropQuadrant($event, quad.id)">
+            <!-- Quadrant header -->
+            <div class="px-3 py-2 border-b flex items-center justify-between"
+                 :style="'background: ' + quad.color + '; border-color: ' + quad.color">
+              <div>
+                <div class="font-semibold text-white text-sm" x-text="quad.label"></div>
+                <div class="text-xs text-white opacity-80" x-text="quad.subtitle"></div>
+              </div>
+              <span class="text-xs text-white opacity-80 bg-white/20 px-2 py-0.5 rounded" 
+                    x-text="getQuadrantCount(quad.id)"></span>
+            </div>
+            <!-- Quadrant tasks -->
+            <div class="flex-1 p-2 overflow-y-auto custom-scroll">
+              <div class="space-y-1.5">
+                <template x-for="task in getTasksByQuadrant(quad.id)" :key="task.id">
+                  <div class="px-2 py-1.5 rounded text-sm cursor-move flex items-center gap-2"
+                       style="background: var(--sn-stylekit-background-color);"
+                       draggable="true" 
+                       @dragstart="onDragStart($event, task)" 
+                       @dragend="onDragEnd($event)">
+                    <div class="flex-shrink-0 w-1 h-4 rounded-full" :class="'weight-' + task.weight"></div>
+                    <span class="truncate" :class="{ 'line-through opacity-50': task.done }" x-text="task.text"></span>
+                  </div>
+                </template>
+                <div x-show="getTasksByQuadrant(quad.id).length === 0" 
+                     class="text-center py-4 text-xs opacity-40">
+                  Drag tasks here
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+      <!-- Unassigned tasks -->
+      <div x-show="getUnassignedTasks().length > 0" class="mt-4 p-3 rounded-lg border" style="border-color: var(--sn-stylekit-border-color); background: var(--sn-stylekit-contrast-background-color);">
+        <div class="text-sm font-medium mb-2 opacity-60">Unassigned to Matrix (<span x-text="getUnassignedTasks().length"></span>)</div>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="task in getUnassignedTasks()" :key="task.id">
+            <div class="px-2 py-1 rounded text-xs cursor-move flex items-center gap-1"
+                 style="background: var(--sn-stylekit-background-color);"
+                 draggable="true"
+                 @dragstart="onDragStart($event, task)"
+                 @dragend="onDragEnd($event)">
+              <div class="w-1 h-3 rounded-full" :class="'weight-' + task.weight"></div>
+              <span :class="{ 'line-through opacity-50': task.done }" x-text="task.text"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </main>
   </div>
 
   <script>
     var STATUSES = [
       { id: 'backlog', label: 'Backlog', color: '#64748b' },
-      { id: 'todo', label: 'To Do', color: '#3b82f6' },
+      { id: 'scheduled', label: 'Scheduled', color: '#8b5cf6' },
+      { id: 'ready', label: 'Ready', color: '#3b82f6' },
       { id: 'in-progress', label: 'In Progress', color: '#f59e0b' },
-      { id: 'done', label: 'Done', color: '#22c55e' }
+      { id: 'blocked', label: 'Blocked', color: '#ef4444' },
+      { id: 'in-review', label: 'In Review', color: '#ec4899' },
+      { id: 'waiting', label: 'Waiting', color: '#f97316' },
+      { id: 'done', label: 'Done', color: '#22c55e' },
+      { id: 'someday', label: 'Someday', color: '#6b7280' }
     ];
-    var DEFAULT_STATUS = 'todo';
+    var DEFAULT_STATUS = 'backlog';
+    
+    // Eisenhower Matrix quadrants
+    var QUADRANTS = [
+      { id: 'q1', label: 'Do First', subtitle: 'Urgent & Important', color: '#ef4444', bg: '#fef2f2' },
+      { id: 'q2', label: 'Schedule', subtitle: 'Not Urgent & Important', color: '#3b82f6', bg: '#eff6ff' },
+      { id: 'q3', label: 'Delegate', subtitle: 'Urgent & Not Important', color: '#f59e0b', bg: '#fffbeb' },
+      { id: 'q4', label: 'Eliminate', subtitle: 'Not Urgent & Not Important', color: '#6b7280', bg: '#f9fafb' }
+    ];
     
     function genUUID() {
       return crypto.randomUUID ? crypto.randomUUID() : 
@@ -730,6 +880,7 @@
         sortBy: 'weight',
         viewMode: 'list',
         statuses: STATUSES,
+        quadrants: QUADRANTS,
         defaultStatus: DEFAULT_STATUS,
         newTaskText: '',
         newSubtaskText: '',
@@ -982,10 +1133,61 @@
           return h > 0 ? h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') : m + ':' + String(s).padStart(2, '0');
         },
         
+        parseTimeInput(input) {
+          if (!input || !input.trim()) return null;
+          input = input.trim().toLowerCase();
+          var totalMinutes = 0;
+          
+          // Handle h:mm format
+          var colonMatch = input.match(/^(\d+):(\d+)$/);
+          if (colonMatch) {
+            totalMinutes = parseInt(colonMatch[1]) * 60 + parseInt(colonMatch[2]);
+            return totalMinutes > 0 ? totalMinutes : null;
+          }
+          
+          // Handle 1h30m, 1h, 30m formats
+          var hourMatch = input.match(/(\d+(?:\.\d+)?)\s*h/);
+          var minMatch = input.match(/(\d+)\s*m/);
+          if (hourMatch) totalMinutes += parseFloat(hourMatch[1]) * 60;
+          if (minMatch) totalMinutes += parseInt(minMatch[1]);
+          if (totalMinutes > 0) return Math.round(totalMinutes);
+          
+          // Handle plain number as minutes
+          var numOnly = parseInt(input);
+          if (!isNaN(numOnly) && numOnly > 0) return numOnly;
+          
+          return null;
+        },
+        
+        setEstimate(task, input) {
+          if (this.locked) return;
+          task.estimatedMinutes = this.parseTimeInput(input);
+          this.save();
+        },
+        
+        formatEstimate(task) {
+          if (!task.estimatedMinutes) return '';
+          var hours = Math.floor(task.estimatedMinutes / 60);
+          var mins = task.estimatedMinutes % 60;
+          if (hours > 0 && mins > 0) return hours + 'h ' + mins + 'm';
+          if (hours > 0) return hours + 'h';
+          return mins + 'm';
+        },
+        
         getTasksByStatus(statusId) {
           var self = this;
           return this.items.filter(function(t) { return (t.status || self.defaultStatus) === statusId; })
             .sort(function(a, b) { return b.weight - a.weight; });
+        },
+        
+        getStatusColor(statusId) {
+          var status = this.statuses.find(function(s) { return s.id === statusId; });
+          return status ? status.color : '#64748b';
+        },
+        
+        getStatusLabel(statusId) {
+          var status = this.statuses.find(function(s) { return s.id === statusId; });
+          return status ? status.label : statusId;
         },
         
         setTaskStatus(task, statusId) {
@@ -1002,6 +1204,48 @@
         getColumnCount(statusId) {
           var self = this;
           return this.items.filter(function(t) { return (t.status || self.defaultStatus) === statusId; }).length;
+        },
+        
+        // Quadrant functions
+        setTaskQuadrant(task, quadrantId) {
+          if (this.locked) return;
+          task.quadrant = quadrantId;
+          this.save();
+        },
+        
+        getTasksByQuadrant(quadrantId) {
+          return this.items
+            .filter(function(t) { return t.quadrant === quadrantId && !t.done; })
+            .sort(function(a, b) { return b.weight - a.weight; });
+        },
+        
+        getQuadrantCount(quadrantId) {
+          return this.items.filter(function(t) { return t.quadrant === quadrantId && !t.done; }).length;
+        },
+        
+        getQuadrantColor(quadrantId) {
+          var quad = this.quadrants.find(function(q) { return q.id === quadrantId; });
+          return quad ? quad.color : '#6b7280';
+        },
+        
+        getQuadrantLabel(quadrantId) {
+          var quad = this.quadrants.find(function(q) { return q.id === quadrantId; });
+          return quad ? quad.label : '';
+        },
+        
+        getUnassignedTasks() {
+          return this.items
+            .filter(function(t) { return !t.quadrant && !t.done; })
+            .sort(function(a, b) { return b.weight - a.weight; });
+        },
+        
+        onDropQuadrant(event, quadrantId) {
+          event.preventDefault();
+          if (this.draggedTask && !this.locked) {
+            this.draggedTask.quadrant = quadrantId;
+            this.save();
+          }
+          this.draggedTask = null;
         },
         
         draggedTask: null,

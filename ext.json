@@ -3,7 +3,7 @@
   "name": "Productivity Tool",
   "content_type": "SN|Component",
   "area": "editor-editor",
-  "version": "1.2.0",
+  "version": "2.3.0",
   "description": "Task management with weights, due dates, and time tracking",
   "url": "https://worlddigitalservices.github.io/sn-productivity-tool",
   "download_url": "https://worlddigitalservices.github.io/sn-productivity-tool/latest.zip",
