@@ -210,17 +210,31 @@
             Debug
           </button>
         </div>
-        <div x-show="debugInfoVisible" class="mt-2 text-xs font-mono" style="background: rgba(0,0,0,0.1); padding: 8px; border-radius: 4px;">
+        <div x-show="debugInfoVisible" class="mt-2 text-xs font-mono" style="background: rgba(0,0,0,0.1); padding: 8px; border-radius: 4px; max-height: 300px; overflow-y: auto;">
           <div>Attempts: <span x-text="connectionAttempts"></span></div>
           <div>In iframe: <span x-text="isInIframe ? 'Yes' : 'No'"></span></div>
           <div>Mobile device: <span x-text="isMobileDevice ? 'Yes' : 'No'"></span></div>
           <div>ReactNativeWebView: <span x-text="hasReactNative ? 'Yes' : 'No'"></span></div>
           <div>Session key: <span x-text="sessionKey ? 'Present' : 'Missing'"></span></div>
-          <div class="mt-1">
+          <div class="mt-2 font-bold">Messages received: <span x-text="getMessageCount()"></span></div>
+          <div x-show="getMessageCount() > 0" class="mt-1 p-1" style="background: rgba(0,0,0,0.1); max-height: 150px; overflow-y: auto;">
+            <template x-for="(msg, i) in getRecentMessages()" :key="i">
+              <div class="text-xs mb-1" style="word-break: break-all;" x-text="msg"></div>
+            </template>
+          </div>
+          <div x-show="getMessageCount() === 0" class="mt-1 text-red-700">
+            ⚠️ No messages received from parent! SN may not be communicating with this iframe.
+          </div>
+          <div class="mt-2 flex gap-2 flex-wrap">
             <button @click.prevent="forceRetry()" 
                     class="px-2 py-1 rounded text-white"
                     style="background: #92400e;">
               Retry Connection
+            </button>
+            <button @click.prevent="copyDebugInfo()" 
+                    class="px-2 py-1 rounded text-white"
+                    style="background: #1e40af;">
+              Copy Debug Info
             </button>
           </div>
         </div>
@@ -625,7 +639,8 @@
     var sentMessages = [];
     var isMobile = false;
     var pendingNoteData = null;
-    var DEBUG_MODE = false; // Set to true to enable console logging for debugging
+    var DEBUG_MODE = true; // ENABLED for mobile debugging
+    var allReceivedMessages = []; // Store all messages for debugging
     
     // Detect mobile environment early
     var isInIframe = window.parent !== window;
@@ -761,13 +776,26 @@
         return;
       }
       
-      if (!data.action) {
-        debugLog('Message missing action:', data);
-        return;
+      // Check for alternative action formats SN might use
+      var action = data.action || data.type || data.event || data.cmd || data.method;
+      if (!action) {
+        // Maybe it's a component-registered with different structure
+        if (data.sessionKey) {
+          debugLog('Found sessionKey in message without action, treating as registration');
+          action = 'component-registered';
+          data.action = action;
+        } else {
+          debugLog('Message missing action:', Object.keys(data));
+          return;
+        }
       }
       
+      // Normalize action name (SN might use different naming)
+      var normalizedAction = action.toLowerCase().replace(/[-_]/g, '');
+      debugLog('Processing action:', action, '(normalized:', normalizedAction + ')');
+      
       // Deduplicate
-      var msgKey = data.messageId || (data.original && data.original.messageId) || data.action + '-' + Date.now();
+      var msgKey = data.messageId || data.id || (data.original && data.original.messageId) || action + '-' + Date.now();
       if (processedMessages[msgKey]) {
         debugLog('Duplicate message ignored:', msgKey);
         return;
@@ -775,20 +803,27 @@
       processedMessages[msgKey] = true;
       setTimeout(function() { delete processedMessages[msgKey]; }, 5000);
 
-      debugLog('Processing action:', data.action);
-
-      if (data.action === 'component-registered') {
+      // Handle component registration (check various formats)
+      if (normalizedAction === 'componentregistered' || 
+          normalizedAction === 'registered' ||
+          normalizedAction === 'ready' ||
+          normalizedAction === 'componentready' ||
+          action === 'component-registered') {
         debugLog('Component registered! sessionKey:', data.sessionKey ? 'present' : 'missing');
-        sessionKey = data.sessionKey;
+        sessionKey = data.sessionKey || data.session_key || data.key;
         if (data.data) {
           if (data.data.environment === 'mobile') {
             isMobile = true;
             debugLog('Mobile environment detected');
           }
+          // Try to get sessionKey from nested data
+          if (!sessionKey && data.data.sessionKey) {
+            sessionKey = data.data.sessionKey;
+          }
         }
         if (window.appInstance) {
           window.appInstance.inStandardNotes = true;
-          window.appInstance.connectionAttempts = 0; // Reset retry counter
+          window.appInstance.connectionAttempts = 0;
         }
         postMessage('stream-context-item', {}, function(response) {
           if (response && response.item) {
@@ -798,11 +833,24 @@
         if (data.data && data.data.activeThemeUrls) {
           activateThemes(data.data.activeThemeUrls);
         }
+        return;
+      }
+      
+      // Handle "activate-component" or similar (SN might send this first)
+      if (normalizedAction === 'activatecomponent' ||
+          normalizedAction === 'activate' ||
+          normalizedAction === 'init' ||
+          normalizedAction === 'initialize') {
+        debugLog('Received activate message, re-sending init');
+        sendInitMessage();
+        return;
       }
 
-      if (data.action === 'themes') {
+      if (action === 'themes' || normalizedAction === 'themes' || normalizedAction === 'theme') {
         if (data.data && data.data.themes) {
           activateThemes(data.data.themes);
+        } else if (data.themes) {
+          activateThemes(data.themes);
         }
       }
 
@@ -818,13 +866,34 @@
         }
       }
 
-      if (data.action === 'stream-context-item' && data.data && data.data.item) {
+      if ((action === 'stream-context-item' || normalizedAction === 'streamcontextitem') && 
+          data.data && data.data.item) {
         handleNote(data.data.item);
+      }
+      
+      // Handle direct note data (SN might send note without wrapping)
+      if (data.content && data.content.text && data.uuid) {
+        debugLog('Received direct note data');
+        handleNote(data);
       }
     }
     
     function handleMessage(event) {
       var data = event.data;
+      
+      // Log ALL messages for debugging (even before filtering)
+      try {
+        var logEntry = {
+          time: new Date().toISOString(),
+          origin: event.origin,
+          type: typeof data,
+          hasNativeEvent: !!event.nativeEvent,
+          raw: typeof data === 'string' ? data.substring(0, 200) : JSON.stringify(data).substring(0, 200)
+        };
+        allReceivedMessages.push(logEntry);
+        if (allReceivedMessages.length > 50) allReceivedMessages.shift(); // Keep last 50
+        debugLog('RAW MESSAGE:', logEntry);
+      } catch (e) {}
       
       // Handle React Native WebView format (data might be in nativeEvent)
       if (event.nativeEvent && event.nativeEvent.data) {
@@ -834,6 +903,15 @@
       debugLog('handleMessage received:', typeof data, data && data.action ? data.action : '');
       processIncomingMessage(data);
     }
+    
+    // Also add a global catch-all for ANY postMessage
+    window.addEventListener('message', function(e) {
+      try {
+        if (e.data && typeof e.data === 'object' && e.data.action) {
+          debugLog('GLOBAL CATCH:', e.data.action);
+        }
+      } catch(err) {}
+    }, true);
 
     function handleNote(note) {
       if (!note) return;
@@ -1569,6 +1647,55 @@
           sendInitMessage();
           this.retryConnection();
           console.log('[SN-Ext] Force retry initiated');
+        },
+        
+        getMessageCount() {
+          return allReceivedMessages.length;
+        },
+        
+        getRecentMessages() {
+          return allReceivedMessages.slice(-10).map(function(m) {
+            return m.time.split('T')[1].split('.')[0] + ' | ' + m.origin + ' | ' + m.raw;
+          }).reverse();
+        },
+        
+        copyDebugInfo() {
+          var info = {
+            timestamp: new Date().toISOString(),
+            userAgent: navigator.userAgent,
+            isInIframe: isInIframe,
+            isMobileDevice: isMobileDevice,
+            hasReactNative: hasReactNative,
+            hasWebkitHandlers: hasWebkitHandlers,
+            isAndroid: isAndroid,
+            isIOS: isIOS,
+            sessionKey: sessionKey ? 'present' : 'missing',
+            connectionAttempts: this.connectionAttempts,
+            messagesReceived: allReceivedMessages.length,
+            recentMessages: allReceivedMessages.slice(-20),
+            windowLocation: window.location.href,
+            parentOrigin: 'unknown'
+          };
+          try {
+            info.parentOrigin = window.parent.location.origin;
+          } catch(e) {
+            info.parentOrigin = 'cross-origin (cannot access)';
+          }
+          
+          var text = JSON.stringify(info, null, 2);
+          
+          // Try to copy to clipboard
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function() {
+              alert('Debug info copied to clipboard!');
+            }).catch(function() {
+              console.log('[SN-Ext] Debug info:', text);
+              alert('Could not copy. Check console for debug info.');
+            });
+          } else {
+            console.log('[SN-Ext] Debug info:', text);
+            alert('Clipboard not available. Check console (if accessible) for debug info.');
+          }
         },
         
         // Kanban methods
