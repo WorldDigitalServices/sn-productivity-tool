@@ -626,16 +626,17 @@
         sentMessages.push({ messageId: msgId, callback: callback });
       }
 
-      // Send to parent frame
+      var msgString = JSON.stringify(msg);
+
+      // Send via all available methods for compatibility
       if (isMobile) {
-        // Mobile needs stringified messages
-        window.parent.postMessage(JSON.stringify(msg), '*');
-        // Also try React Native WebView
-        if (window.ReactNativeWebView) {
-          window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+        // Mobile: prefer stringified + React Native bridge
+        window.parent.postMessage(msgString, '*');
+        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+          window.ReactNativeWebView.postMessage(msgString);
         }
       } else {
-        // Desktop can use object
+        // Desktop: object format
         window.parent.postMessage(msg, '*');
       }
     }
@@ -654,12 +655,34 @@
       postMessage('save-items', { items: [itemCopy] });
     }
 
+    var processedMessages = {}; // Track processed messageIds to avoid duplicates
+    
     function handleMessage(event) {
       var data = event.data;
-      if (typeof data === 'string') {
-        try { data = JSON.parse(data); } catch (e) { return; }
+      
+      // Handle React Native WebView format (data might be in nativeEvent)
+      if (event.nativeEvent && event.nativeEvent.data) {
+        data = event.nativeEvent.data;
       }
+      
+      // Parse stringified JSON
+      if (typeof data === 'string') {
+        try { 
+          data = JSON.parse(data); 
+        } catch (e) { 
+          return; 
+        }
+      }
+      
       if (!data || typeof data !== 'object') return;
+      if (!data.action) return; // Must have an action
+      
+      // Deduplicate messages (we have multiple listeners)
+      var msgKey = data.messageId || (data.original && data.original.messageId) || data.action + Date.now();
+      if (processedMessages[msgKey]) return;
+      processedMessages[msgKey] = true;
+      // Clean up old entries periodically
+      setTimeout(function() { delete processedMessages[msgKey]; }, 5000);
 
       if (data.action === 'component-registered') {
         sessionKey = data.sessionKey;
@@ -754,10 +777,13 @@
     }
 
     function initSN() {
-      // Listen for messages from parent
-      window.addEventListener('message', handleMessage);
-      // Also listen on document for some mobile WebViews
-      document.addEventListener('message', handleMessage);
+      // Listen for messages - need multiple listeners for cross-platform compatibility
+      // Desktop: window 'message' event
+      // iOS mobile: window 'message' event  
+      // Android mobile: document 'message' event OR window with capture=true
+      window.addEventListener('message', handleMessage, false);
+      window.addEventListener('message', handleMessage, true); // capture phase for Android
+      document.addEventListener('message', handleMessage, false);
 
       if (window.parent !== window) {
         sendInitMessage();
@@ -774,17 +800,23 @@
         api: 'component'
       };
       
-      // Try multiple methods for maximum mobile compatibility
+      // Try multiple methods for maximum compatibility
+      var msgString = JSON.stringify(initMsg);
       
-      // Method 1: Standard postMessage (desktop)
+      // Method 1: Standard postMessage to parent (desktop)
       window.parent.postMessage(initMsg, '*');
       
-      // Method 2: Stringified postMessage (mobile)
-      window.parent.postMessage(JSON.stringify(initMsg), '*');
+      // Method 2: Stringified postMessage (some mobile)
+      window.parent.postMessage(msgString, '*');
       
-      // Method 3: React Native WebView (some mobile apps)
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify(initMsg));
+      // Method 3: React Native WebView bridge
+      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+        window.ReactNativeWebView.postMessage(msgString);
+      }
+      
+      // Method 4: Webkit message handler (iOS WKWebView)
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appMessageHandler) {
+        window.webkit.messageHandlers.appMessageHandler.postMessage(msgString);
       }
     }
     
