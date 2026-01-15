@@ -202,7 +202,28 @@
       <!-- Connection status (show if in iframe but not connected after retries) -->
       <div x-show="!inStandardNotes && connectionAttempts >= 5" class="mb-4 px-4 py-3 rounded-lg text-sm"
            style="background: #fef3c7; color: #92400e;">
-        ⚠️ Not syncing with Standard Notes. Changes saved locally only.
+        <div class="flex items-start justify-between gap-2">
+          <span>⚠️ Not syncing with Standard Notes. Changes saved locally only.</span>
+          <button @click.prevent="showDebugInfo()" 
+                  class="text-xs underline whitespace-nowrap"
+                  title="Show diagnostic info">
+            Debug
+          </button>
+        </div>
+        <div x-show="debugInfoVisible" class="mt-2 text-xs font-mono" style="background: rgba(0,0,0,0.1); padding: 8px; border-radius: 4px;">
+          <div>Attempts: <span x-text="connectionAttempts"></span></div>
+          <div>In iframe: <span x-text="isInIframe ? 'Yes' : 'No'"></span></div>
+          <div>Mobile device: <span x-text="isMobileDevice ? 'Yes' : 'No'"></span></div>
+          <div>ReactNativeWebView: <span x-text="hasReactNative ? 'Yes' : 'No'"></span></div>
+          <div>Session key: <span x-text="sessionKey ? 'Present' : 'Missing'"></span></div>
+          <div class="mt-1">
+            <button @click.prevent="forceRetry()" 
+                    class="px-2 py-1 rounded text-white"
+                    style="background: #92400e;">
+              Retry Connection
+            </button>
+          </div>
+        </div>
       </div>
       
       <!-- Tasks -->
@@ -596,14 +617,31 @@
     const DEFAULT_STATUS = 'backlog';  // New tasks get this status
     
     // ========================================
-    // STANDARD NOTES SYNC CODE (PROVEN - DO NOT MODIFY)
+    // STANDARD NOTES SYNC CODE - ENHANCED MOBILE SUPPORT
     // ========================================
     
     var sessionKey = null;
     var lastNote = null;
     var sentMessages = [];
     var isMobile = false;
-    var pendingNoteData = null; // Store note data if received before Alpine init
+    var pendingNoteData = null;
+    var DEBUG_MODE = false; // Set to true to enable console logging for debugging
+    
+    // Detect mobile environment early
+    var isInIframe = window.parent !== window;
+    var hasReactNative = typeof window.ReactNativeWebView !== 'undefined';
+    var hasWebkitHandlers = typeof window.webkit !== 'undefined' && 
+                            window.webkit.messageHandlers !== undefined;
+    var userAgent = navigator.userAgent || '';
+    var isAndroid = /android/i.test(userAgent);
+    var isIOS = /iphone|ipad|ipod/i.test(userAgent);
+    var isMobileDevice = isAndroid || isIOS || hasReactNative;
+    
+    function debugLog() {
+      if (DEBUG_MODE && console && console.log) {
+        console.log.apply(console, ['[SN-Ext]'].concat(Array.prototype.slice.call(arguments)));
+      }
+    }
 
     function genUUID() {
       return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -611,6 +649,28 @@
         return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
       });
     }
+
+    // Global handler that SN can call directly via injectJavaScript
+    // This is the KEY fix for mobile - SN may call this instead of postMessage
+    window.snComponentMessage = function(message) {
+      debugLog('snComponentMessage called with:', message);
+      processIncomingMessage(message);
+    };
+    
+    // Alternative global handlers SN might use
+    window.postMessageFromStandardNotes = function(message) {
+      debugLog('postMessageFromStandardNotes called');
+      processIncomingMessage(message);
+    };
+    
+    window.receiveMessage = function(message) {
+      debugLog('receiveMessage called');
+      processIncomingMessage(message);
+    };
+    
+    // Flag to signal component is ready (SN mobile may check for this)
+    window.isComponentReady = true;
+    window.componentReady = true;
 
     function postMessage(action, data, callback) {
       var msgId = genUUID();
@@ -627,18 +687,46 @@
       }
 
       var msgString = JSON.stringify(msg);
+      debugLog('Sending message:', action, 'mobile:', isMobile);
 
-      // Send via all available methods for compatibility
-      if (isMobile) {
-        // Mobile: prefer stringified + React Native bridge
-        window.parent.postMessage(msgString, '*');
+      // Always try multiple methods for reliability
+      try {
+        // Method 1: Standard postMessage to parent (works in desktop Electron)
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(msg, '*');
+          // Also send stringified version
+          window.parent.postMessage(msgString, '*');
+        }
+      } catch (e) { debugLog('parent.postMessage error:', e); }
+
+      try {
+        // Method 2: React Native WebView bridge
         if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
           window.ReactNativeWebView.postMessage(msgString);
         }
-      } else {
-        // Desktop: object format
-        window.parent.postMessage(msg, '*');
-      }
+      } catch (e) { debugLog('ReactNativeWebView.postMessage error:', e); }
+
+      try {
+        // Method 3: iOS WKWebView message handlers
+        if (window.webkit && window.webkit.messageHandlers) {
+          // Try common handler names SN might use
+          var handlers = ['appMessageHandler', 'nativeMessageHandler', 'snMessageHandler', 'ReactNativeWebView'];
+          for (var i = 0; i < handlers.length; i++) {
+            if (window.webkit.messageHandlers[handlers[i]]) {
+              window.webkit.messageHandlers[handlers[i]].postMessage(msgString);
+              break;
+            }
+          }
+        }
+      } catch (e) { debugLog('webkit.messageHandlers error:', e); }
+      
+      try {
+        // Method 4: Post to top frame (in case of nested iframes)
+        if (window.top && window.top !== window && window.top !== window.parent) {
+          window.top.postMessage(msg, '*');
+          window.top.postMessage(msgString, '*');
+        }
+      } catch (e) { debugLog('top.postMessage error:', e); }
     }
 
     function saveToSN() {
@@ -655,42 +743,52 @@
       postMessage('save-items', { items: [itemCopy] });
     }
 
-    var processedMessages = {}; // Track processed messageIds to avoid duplicates
+    var processedMessages = {};
     
-    function handleMessage(event) {
-      var data = event.data;
-      
-      // Handle React Native WebView format (data might be in nativeEvent)
-      if (event.nativeEvent && event.nativeEvent.data) {
-        data = event.nativeEvent.data;
-      }
-      
-      // Parse stringified JSON
+    function processIncomingMessage(data) {
+      // Parse if string
       if (typeof data === 'string') {
         try { 
           data = JSON.parse(data); 
         } catch (e) { 
+          debugLog('JSON parse error:', e);
           return; 
         }
       }
       
-      if (!data || typeof data !== 'object') return;
-      if (!data.action) return; // Must have an action
+      if (!data || typeof data !== 'object') {
+        debugLog('Invalid message data:', data);
+        return;
+      }
       
-      // Deduplicate messages (we have multiple listeners)
-      var msgKey = data.messageId || (data.original && data.original.messageId) || data.action + Date.now();
-      if (processedMessages[msgKey]) return;
+      if (!data.action) {
+        debugLog('Message missing action:', data);
+        return;
+      }
+      
+      // Deduplicate
+      var msgKey = data.messageId || (data.original && data.original.messageId) || data.action + '-' + Date.now();
+      if (processedMessages[msgKey]) {
+        debugLog('Duplicate message ignored:', msgKey);
+        return;
+      }
       processedMessages[msgKey] = true;
-      // Clean up old entries periodically
       setTimeout(function() { delete processedMessages[msgKey]; }, 5000);
 
+      debugLog('Processing action:', data.action);
+
       if (data.action === 'component-registered') {
+        debugLog('Component registered! sessionKey:', data.sessionKey ? 'present' : 'missing');
         sessionKey = data.sessionKey;
         if (data.data) {
-          if (data.data.environment === 'mobile') isMobile = true;
+          if (data.data.environment === 'mobile') {
+            isMobile = true;
+            debugLog('Mobile environment detected');
+          }
         }
         if (window.appInstance) {
           window.appInstance.inStandardNotes = true;
+          window.appInstance.connectionAttempts = 0; // Reset retry counter
         }
         postMessage('stream-context-item', {}, function(response) {
           if (response && response.item) {
@@ -724,11 +822,24 @@
         handleNote(data.data.item);
       }
     }
+    
+    function handleMessage(event) {
+      var data = event.data;
+      
+      // Handle React Native WebView format (data might be in nativeEvent)
+      if (event.nativeEvent && event.nativeEvent.data) {
+        data = event.nativeEvent.data;
+      }
+      
+      debugLog('handleMessage received:', typeof data, data && data.action ? data.action : '');
+      processIncomingMessage(data);
+    }
 
     function handleNote(note) {
       if (!note) return;
       if (note.isMetadataUpdate) return;
 
+      debugLog('Received note update');
       lastNote = note;
       
       var items = [];
@@ -744,8 +855,8 @@
       if (window.appInstance) {
         window.appInstance.items = items;
         window.appInstance.locked = locked;
+        window.appInstance.inStandardNotes = true;
       } else {
-        // Store for later if Alpine hasn't initialized yet
         pendingNoteData = { items: items, locked: locked };
       }
     }
@@ -777,51 +888,128 @@
     }
 
     function initSN() {
-      // Listen for messages - need multiple listeners for cross-platform compatibility
-      // Desktop: window 'message' event
-      // iOS mobile: window 'message' event  
-      // Android mobile: document 'message' event OR window with capture=true
+      debugLog('initSN called, isInIframe:', isInIframe, 'isMobileDevice:', isMobileDevice);
+      
+      // Listen for messages - comprehensive cross-platform approach
+      
+      // Standard window message event
       window.addEventListener('message', handleMessage, false);
-      window.addEventListener('message', handleMessage, true); // capture phase for Android
+      
+      // Capture phase (needed for some Android WebViews)
+      window.addEventListener('message', handleMessage, true);
+      
+      // Document message event (Android React Native WebView sometimes fires here)
       document.addEventListener('message', handleMessage, false);
+      document.addEventListener('message', handleMessage, true);
+      
+      // Also listen on body in case events bubble there
+      if (document.body) {
+        document.body.addEventListener('message', handleMessage, false);
+      }
+      
+      // For mobile: try to detect when SN injects content
+      // by using MutationObserver to watch for changes
+      if (isMobileDevice && typeof MutationObserver !== 'undefined') {
+        var observer = new MutationObserver(function(mutations) {
+          // SN might inject a script that sets global variables
+          if (window.snComponentData && !sessionKey) {
+            debugLog('Found snComponentData via MutationObserver');
+            processIncomingMessage(window.snComponentData);
+          }
+        });
+        observer.observe(document.documentElement, { 
+          childList: true, 
+          subtree: true 
+        });
+        // Stop observing after 10 seconds to avoid performance impact
+        setTimeout(function() { observer.disconnect(); }, 10000);
+      }
 
-      if (window.parent !== window) {
+      if (isInIframe) {
         sendInitMessage();
       }
     }
     
     function sendInitMessage() {
-      // Don't send if already registered
       if (sessionKey) return;
+      
+      debugLog('sendInitMessage called');
       
       var initMsg = {
         action: 'component-initialized',
         messageId: genUUID(),
-        api: 'component'
+        api: 'component',
+        // Add extra info that might help SN identify this component
+        data: {
+          acceptsThemes: true,
+          platform: isMobileDevice ? 'mobile' : 'desktop',
+          environment: isAndroid ? 'android' : (isIOS ? 'ios' : 'web')
+        }
       };
       
-      // Try multiple methods for maximum compatibility
       var msgString = JSON.stringify(initMsg);
       
-      // Method 1: Standard postMessage to parent (desktop)
-      window.parent.postMessage(initMsg, '*');
+      try {
+        // Method 1: Standard postMessage to parent (desktop Electron)
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(initMsg, '*');
+          window.parent.postMessage(msgString, '*');
+        }
+      } catch (e) { debugLog('Init parent.postMessage error:', e); }
       
-      // Method 2: Stringified postMessage (some mobile)
-      window.parent.postMessage(msgString, '*');
+      try {
+        // Method 2: React Native WebView bridge (Android/iOS RN apps)
+        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+          window.ReactNativeWebView.postMessage(msgString);
+        }
+      } catch (e) { debugLog('Init ReactNativeWebView error:', e); }
       
-      // Method 3: React Native WebView bridge
-      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
-        window.ReactNativeWebView.postMessage(msgString);
-      }
+      try {
+        // Method 3: Webkit message handlers (iOS WKWebView)
+        if (window.webkit && window.webkit.messageHandlers) {
+          var handlers = ['appMessageHandler', 'nativeMessageHandler', 'snMessageHandler', 'ReactNativeWebView'];
+          for (var i = 0; i < handlers.length; i++) {
+            if (window.webkit.messageHandlers[handlers[i]]) {
+              window.webkit.messageHandlers[handlers[i]].postMessage(msgString);
+            }
+          }
+        }
+      } catch (e) { debugLog('Init webkit error:', e); }
       
-      // Method 4: Webkit message handler (iOS WKWebView)
-      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appMessageHandler) {
-        window.webkit.messageHandlers.appMessageHandler.postMessage(msgString);
-      }
+      try {
+        // Method 4: Top frame (nested iframes)
+        if (window.top && window.top !== window && window.top !== window.parent) {
+          window.top.postMessage(initMsg, '*');
+          window.top.postMessage(msgString, '*');
+        }
+      } catch (e) { debugLog('Init top.postMessage error:', e); }
+      
+      // Signal readiness
+      window.componentInitialized = true;
+      
+      // Dispatch custom event that SN might listen for
+      try {
+        var event = new CustomEvent('component-initialized', { 
+          detail: initMsg,
+          bubbles: true 
+        });
+        window.dispatchEvent(event);
+        document.dispatchEvent(event);
+      } catch (e) { debugLog('Custom event error:', e); }
     }
     
     // Initialize SN connection immediately (before Alpine)
     initSN();
+    
+    // Expose debug toggle for troubleshooting
+    window.enableSNDebug = function() { 
+      DEBUG_MODE = true; 
+      console.log('[SN-Ext] Debug mode enabled');
+      console.log('[SN-Ext] sessionKey:', sessionKey ? 'present' : 'missing');
+      console.log('[SN-Ext] isMobile:', isMobile);
+      console.log('[SN-Ext] isInIframe:', isInIframe);
+      console.log('[SN-Ext] hasReactNative:', hasReactNative);
+    };
     
     // ========================================
     // ALPINE.JS APP
@@ -837,6 +1025,15 @@
         connectionAttempts: 0,
         sortBy: 'weight', // 'weight' or 'dueDate'
         viewMode: 'list', // 'list' or 'kanban'
+        
+        // Debug state
+        debugInfoVisible: false,
+        
+        // Expose global detection variables to template
+        get isInIframe() { return isInIframe; },
+        get isMobileDevice() { return isMobileDevice; },
+        get hasReactNative() { return hasReactNative; },
+        get sessionKey() { return sessionKey; },
         
         // Kanban config (from global)
         statuses: STATUSES,
@@ -1303,15 +1500,75 @@
         
         retryConnection() {
           var self = this;
-          var attempts = [100, 300, 600, 1000, 2000];
-          attempts.forEach(function(delay) {
+          // More aggressive retry pattern for mobile
+          // Mobile React Native WebView can be slow to initialize
+          var attempts = [100, 300, 500, 800, 1200, 1800, 2500, 3500, 5000, 8000];
+          attempts.forEach(function(delay, index) {
             setTimeout(function() {
               if (!sessionKey) {
                 self.connectionAttempts++;
                 sendInitMessage();
+                // On mobile, also try triggering a custom event
+                if (isMobileDevice) {
+                  try {
+                    var readyEvent = new CustomEvent('sn-component-ready', {
+                      detail: { timestamp: Date.now() },
+                      bubbles: true
+                    });
+                    window.dispatchEvent(readyEvent);
+                  } catch (e) {}
+                }
               }
             }, delay);
           });
+          
+          // Also poll for SN connection status periodically
+          var pollCount = 0;
+          var pollInterval = setInterval(function() {
+            pollCount++;
+            if (sessionKey || pollCount > 30) {
+              clearInterval(pollInterval);
+              return;
+            }
+            // Check if SN has injected any global data we might have missed
+            if (window.snComponentData || window.snSessionKey) {
+              if (window.snSessionKey && !sessionKey) {
+                sessionKey = window.snSessionKey;
+                self.inStandardNotes = true;
+                self.connectionAttempts = 0;
+              }
+              if (window.snComponentData) {
+                processIncomingMessage(window.snComponentData);
+              }
+            }
+          }, 500);
+        },
+        
+        // Debug methods
+        showDebugInfo() {
+          this.debugInfoVisible = !this.debugInfoVisible;
+          if (this.debugInfoVisible) {
+            // Enable console debug mode too
+            DEBUG_MODE = true;
+            console.log('[SN-Ext] Debug info shown');
+            console.log('[SN-Ext] Environment:', {
+              isInIframe: isInIframe,
+              isMobileDevice: isMobileDevice,
+              hasReactNative: hasReactNative,
+              hasWebkitHandlers: hasWebkitHandlers,
+              isAndroid: isAndroid,
+              isIOS: isIOS,
+              sessionKey: sessionKey ? 'present' : 'missing',
+              connectionAttempts: this.connectionAttempts
+            });
+          }
+        },
+        
+        forceRetry() {
+          this.connectionAttempts = 0;
+          sendInitMessage();
+          this.retryConnection();
+          console.log('[SN-Ext] Force retry initiated');
         },
         
         // Kanban methods
