@@ -120,6 +120,7 @@
           <span class="text-sm opacity-60" x-text="progressText"></span>
           <!-- Sync indicator -->
           <span x-show="inStandardNotes" class="w-2 h-2 rounded-full bg-green-500" title="Synced with Standard Notes"></span>
+          <span x-show="!inStandardNotes && connectionAttempts > 0" class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" title="Connecting..."></span>
         </div>
         <div class="flex items-center gap-2">
           <!-- View toggle -->
@@ -196,6 +197,12 @@
       <div x-show="locked" class="mb-4 px-4 py-3 rounded-lg text-sm opacity-70"
            style="background: var(--sn-stylekit-contrast-background-color);">
         🔒 This note is locked. Unlock to edit.
+      </div>
+      
+      <!-- Connection status (show if in iframe but not connected after retries) -->
+      <div x-show="!inStandardNotes && connectionAttempts >= 5" class="mb-4 px-4 py-3 rounded-lg text-sm"
+           style="background: #fef3c7; color: #92400e;">
+        ⚠️ Not syncing with Standard Notes. Changes saved locally only.
       </div>
       
       <!-- Tasks -->
@@ -283,7 +290,7 @@
                       <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
                       </svg>
-                      <span x-text="getTimeDisplay(task)"></span>
+                      <span x-text="(timerTick, getTimeDisplay(task))"></span>
                     </span>
                   </template>
                   
@@ -366,7 +373,7 @@
                           :class="task.timerStartedAt ? 'bg-red-500 text-white' : 'bg-green-500 text-white'">
                     <span x-text="task.timerStartedAt ? 'Stop' : 'Start'"></span>
                   </button>
-                  <span class="text-sm" x-text="'Tracked: ' + formatSeconds(getCurrentTrackedSeconds(task))"></span>
+                  <span class="text-sm" x-text="'Tracked: ' + (timerTick, formatSeconds(getCurrentTrackedSeconds(task)))"></span>
                   <button x-show="task.trackedSeconds > 0 || task.timerStartedAt" 
                           @click.prevent="resetTimer(task)"
                           :disabled="locked"
@@ -530,7 +537,7 @@
                           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
                           </svg>
-                          <span x-text="getTimeDisplay(task)"></span>
+                          <span x-text="(timerTick, getTimeDisplay(task))"></span>
                         </span>
                       </template>
                       
@@ -619,8 +626,18 @@
         sentMessages.push({ messageId: msgId, callback: callback });
       }
 
-      var toSend = isMobile ? JSON.stringify(msg) : msg;
-      window.parent.postMessage(toSend, '*');
+      // Send to parent frame
+      if (isMobile) {
+        // Mobile needs stringified messages
+        window.parent.postMessage(JSON.stringify(msg), '*');
+        // Also try React Native WebView
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+        }
+      } else {
+        // Desktop can use object
+        window.parent.postMessage(msg, '*');
+      }
     }
 
     function saveToSN() {
@@ -737,15 +754,37 @@
     }
 
     function initSN() {
+      // Listen for messages from parent
       window.addEventListener('message', handleMessage);
+      // Also listen on document for some mobile WebViews
+      document.addEventListener('message', handleMessage);
 
       if (window.parent !== window) {
-        var initMsg = {
-          action: 'component-initialized',
-          messageId: genUUID(),
-          api: 'component'
-        };
-        window.parent.postMessage(initMsg, '*');
+        sendInitMessage();
+      }
+    }
+    
+    function sendInitMessage() {
+      // Don't send if already registered
+      if (sessionKey) return;
+      
+      var initMsg = {
+        action: 'component-initialized',
+        messageId: genUUID(),
+        api: 'component'
+      };
+      
+      // Try multiple methods for maximum mobile compatibility
+      
+      // Method 1: Standard postMessage (desktop)
+      window.parent.postMessage(initMsg, '*');
+      
+      // Method 2: Stringified postMessage (mobile)
+      window.parent.postMessage(JSON.stringify(initMsg), '*');
+      
+      // Method 3: React Native WebView (some mobile apps)
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(initMsg));
       }
     }
     
@@ -763,6 +802,7 @@
         locked: false,
         darkMode: false,
         inStandardNotes: false,
+        connectionAttempts: 0,
         sortBy: 'weight', // 'weight' or 'dueDate'
         viewMode: 'list', // 'list' or 'kanban'
         
@@ -800,6 +840,11 @@
           } else {
             // Load from localStorage as fallback (standalone mode)
             this.loadFromStorage();
+            
+            // If in iframe but not connected yet, retry init messages
+            if (window.parent !== window) {
+              this.retryConnection();
+            }
           }
           
           // Detect dark mode preference
@@ -1193,9 +1238,6 @@
         },
         
         getCurrentTrackedSeconds(task) {
-          // Reference timerTick to trigger reactivity
-          var tick = this.timerTick;
-          
           var base = task.trackedSeconds || 0;
           if (task.timerStartedAt) {
             var started = new Date(task.timerStartedAt).getTime();
@@ -1225,6 +1267,19 @@
         toggleDarkMode() {
           this.darkMode = !this.darkMode;
           localStorage.setItem('sn-productivity-darkmode', this.darkMode.toString());
+        },
+        
+        retryConnection() {
+          var self = this;
+          var attempts = [100, 300, 600, 1000, 2000];
+          attempts.forEach(function(delay) {
+            setTimeout(function() {
+              if (!sessionKey) {
+                self.connectionAttempts++;
+                sendInitMessage();
+              }
+            }, delay);
+          });
         },
         
         // Kanban methods
