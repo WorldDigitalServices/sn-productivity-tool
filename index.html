@@ -118,6 +118,8 @@
         <div class="flex items-center gap-3">
           <h1 class="text-lg font-semibold">Tasks</h1>
           <span class="text-sm opacity-60" x-text="progressText"></span>
+          <!-- Sync indicator -->
+          <span x-show="inStandardNotes" class="w-2 h-2 rounded-full bg-green-500" title="Synced with Standard Notes"></span>
         </div>
         <div class="flex items-center gap-2">
           <!-- View toggle -->
@@ -594,6 +596,7 @@
     var lastNote = null;
     var sentMessages = [];
     var isMobile = false;
+    var pendingNoteData = null; // Store note data if received before Alpine init
 
     function genUUID() {
       return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -701,6 +704,9 @@
       if (window.appInstance) {
         window.appInstance.items = items;
         window.appInstance.locked = locked;
+      } else {
+        // Store for later if Alpine hasn't initialized yet
+        pendingNoteData = { items: items, locked: locked };
       }
     }
 
@@ -743,6 +749,9 @@
       }
     }
     
+    // Initialize SN connection immediately (before Alpine)
+    initSN();
+    
     // ========================================
     // ALPINE.JS APP
     // ========================================
@@ -778,8 +787,20 @@
         init() {
           window.appInstance = this;
           
-          // Load from localStorage first
-          this.loadFromStorage();
+          // Check if SN already sent note data before Alpine initialized
+          if (pendingNoteData) {
+            this.items = pendingNoteData.items;
+            this.locked = pendingNoteData.locked;
+            this.inStandardNotes = true;
+            pendingNoteData = null;
+          } else if (sessionKey) {
+            // SN registered but no note data yet - we're in SN
+            this.inStandardNotes = true;
+            this.loadFromStorage();
+          } else {
+            // Load from localStorage as fallback (standalone mode)
+            this.loadFromStorage();
+          }
           
           // Detect dark mode preference
           if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
@@ -791,9 +812,6 @@
           if (savedDarkMode !== null) {
             this.darkMode = savedDarkMode === 'true';
           }
-          
-          // Initialize Standard Notes connection
-          initSN();
           
           // Start timer update interval (every second for live display)
           this.timerInterval = setInterval(() => {
