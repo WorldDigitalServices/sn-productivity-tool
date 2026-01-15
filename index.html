@@ -707,10 +707,9 @@
       // Always try multiple methods for reliability
       try {
         // Method 1: Standard postMessage to parent (works in desktop Electron)
+        // Note: Only send object to postMessage, not stringified (mobile gets confused by duplicates)
         if (window.parent && window.parent !== window) {
           window.parent.postMessage(msg, '*');
-          // Also send stringified version
-          window.parent.postMessage(msgString, '*');
         }
       } catch (e) { debugLog('parent.postMessage error:', e); }
 
@@ -739,7 +738,6 @@
         // Method 4: Post to top frame (in case of nested iframes)
         if (window.top && window.top !== window && window.top !== window.parent) {
           window.top.postMessage(msg, '*');
-          window.top.postMessage(msgString, '*');
         }
       } catch (e) { debugLog('top.postMessage error:', e); }
     }
@@ -1013,30 +1011,27 @@
       
       debugLog('sendInitMessage called');
       
+      // Minimal init message - matching what working extensions send
+      // Extra fields in 'data' can confuse SN mobile
       var initMsg = {
         action: 'component-initialized',
         messageId: genUUID(),
-        api: 'component',
-        // Add extra info that might help SN identify this component
-        data: {
-          acceptsThemes: true,
-          platform: isMobileDevice ? 'mobile' : 'desktop',
-          environment: isAndroid ? 'android' : (isIOS ? 'ios' : 'web')
-        }
+        api: 'component'
       };
       
       var msgString = JSON.stringify(initMsg);
       
       try {
         // Method 1: Standard postMessage to parent (desktop Electron)
+        // Only send object version, not stringified (duplicates confuse mobile)
         if (window.parent && window.parent !== window) {
           window.parent.postMessage(initMsg, '*');
-          window.parent.postMessage(msgString, '*');
         }
       } catch (e) { debugLog('Init parent.postMessage error:', e); }
       
       try {
         // Method 2: React Native WebView bridge (Android/iOS RN apps)
+        // RN WebView REQUIRES string format
         if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
           window.ReactNativeWebView.postMessage(msgString);
         }
@@ -1049,6 +1044,7 @@
           for (var i = 0; i < handlers.length; i++) {
             if (window.webkit.messageHandlers[handlers[i]]) {
               window.webkit.messageHandlers[handlers[i]].postMessage(msgString);
+              break; // Only send to first available handler
             }
           }
         }
@@ -1058,7 +1054,6 @@
         // Method 4: Top frame (nested iframes)
         if (window.top && window.top !== window && window.top !== window.parent) {
           window.top.postMessage(initMsg, '*');
-          window.top.postMessage(msgString, '*');
         }
       } catch (e) { debugLog('Init top.postMessage error:', e); }
       
@@ -1076,8 +1071,12 @@
       } catch (e) { debugLog('Custom event error:', e); }
     }
     
-    // Initialize SN connection immediately (before Alpine)
-    initSN();
+    // Initialize SN connection - wait for DOM on mobile for reliability
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initSN);
+    } else {
+      initSN();
+    }
     
     // Expose debug toggle for troubleshooting
     window.enableSNDebug = function() { 
