@@ -1177,12 +1177,21 @@
     <main x-show="viewMode === 'search'" class="flex-1 overflow-y-auto custom-scroll px-4 py-3">
       <!-- Search and filter controls -->
       <div class="mb-4 space-y-3">
+        <!-- Search bar row -->
         <div class="flex gap-2">
           <input type="text" 
                  x-model="searchQuery"
                  placeholder="Search tasks, notes, tags..."
                  class="flex-1 px-4 py-3 rounded-lg border text-base min-h-[44px]"
                  style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+          <button @click.prevent="showSearchFilters = !showSearchFilters" 
+                  class="px-4 py-3 rounded-lg font-medium min-h-[44px] flex items-center gap-2"
+                  :style="showSearchFilters || filterStatus || filterQuadrant || filterHasDueDate || filterBlocked || filterTag || showArchived ? 'background: var(--sn-stylekit-accent-color); color: white;' : 'background: var(--sn-stylekit-contrast-background-color);'">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
+            </svg>
+            <span class="hidden sm:inline">Filters</span>
+          </button>
           <button @click.prevent="clearFilters()" 
                   class="px-4 py-3 rounded-lg font-medium min-h-[44px]"
                   style="background: var(--sn-stylekit-contrast-background-color);">
@@ -1190,92 +1199,132 @@
           </button>
         </div>
         
-        <div class="flex flex-wrap gap-3">
-          <!-- Status filter -->
-          <div class="flex items-center gap-2">
-            <label class="text-sm opacity-60">Status:</label>
-            <select x-model="filterStatus" 
-                    class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
-                    style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
-              <option value="">All</option>
-              <template x-for="status in statuses" :key="status.id">
-                <option :value="status.id" x-text="status.label"></option>
-              </template>
-            </select>
+        <!-- Sort row (always visible) -->
+        <div class="flex items-center gap-3">
+          <label class="text-sm opacity-60">Sort by:</label>
+          <select x-model="searchSortBy" 
+                  class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
+                  style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+            <option value="createdAt">Created (newest)</option>
+            <option value="createdAtAsc">Created (oldest)</option>
+            <option value="dueDate">Due Date</option>
+            <option value="weight">Priority</option>
+            <option value="status">Status</option>
+            <option value="completedAt">Completed</option>
+          </select>
+          <span class="text-sm opacity-60 ml-auto">
+            <span x-text="getFilteredTasks().length"></span> task(s)
+            <span x-show="showArchived === 'include'"> (incl. archived)</span>
+            <span x-show="showArchived === 'only'"> (archived)</span>
+          </span>
+        </div>
+        
+        <!-- Collapsible filter panel -->
+        <div x-show="showSearchFilters" x-collapse class="p-4 rounded-lg border space-y-4" style="border-color: var(--sn-stylekit-border-color); background: var(--sn-stylekit-contrast-background-color);">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <!-- Status filter -->
+            <div class="flex flex-col gap-1">
+              <label class="text-xs opacity-60 font-medium">Status</label>
+              <select x-model="filterStatus" 
+                      class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
+                      style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                <option value="">All Statuses</option>
+                <template x-for="status in statuses" :key="status.id">
+                  <option :value="status.id" x-text="status.label"></option>
+                </template>
+              </select>
+            </div>
+            
+            <!-- Quadrant filter -->
+            <div class="flex flex-col gap-1">
+              <label class="text-xs opacity-60 font-medium">Quadrant</label>
+              <select x-model="filterQuadrant" 
+                      class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
+                      style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                <option value="">All Quadrants</option>
+                <template x-for="quad in quadrants" :key="quad.id">
+                  <option :value="quad.id" x-text="quad.label"></option>
+                </template>
+                <option value="none">Unassigned</option>
+              </select>
+            </div>
+            
+            <!-- Due date filter -->
+            <div class="flex flex-col gap-1">
+              <label class="text-xs opacity-60 font-medium">Due Date</label>
+              <select x-model="filterHasDueDate" 
+                      class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
+                      style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                <option value="">Any</option>
+                <option value="yes">Has due date</option>
+                <option value="no">No due date</option>
+                <option value="overdue">Overdue</option>
+              </select>
+            </div>
+            
+            <!-- Blocked filter -->
+            <div class="flex flex-col gap-1">
+              <label class="text-xs opacity-60 font-medium">Blocked</label>
+              <select x-model="filterBlocked" 
+                      class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
+                      style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                <option value="">Any</option>
+                <option value="blocked">Blocked tasks</option>
+                <option value="hasBlocker">With blocker info</option>
+                <option value="blockerResolved">Blocker resolved</option>
+              </select>
+            </div>
+            
+            <!-- Tag filter -->
+            <div class="flex flex-col gap-1" x-show="getAllTags().length > 0">
+              <label class="text-xs opacity-60 font-medium">Tag</label>
+              <select x-model="filterTag" 
+                      class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
+                      style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                <option value="">All Tags</option>
+                <template x-for="tag in getAllTags()" :key="tag">
+                  <option :value="tag" x-text="tag"></option>
+                </template>
+              </select>
+            </div>
+            
+            <!-- Archived filter -->
+            <div class="flex flex-col gap-1">
+              <label class="text-xs opacity-60 font-medium">Archived</label>
+              <select x-model="showArchived" 
+                      class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
+                      style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                <option value="">Active only</option>
+                <option value="include">Include archived</option>
+                <option value="only">Archived only</option>
+              </select>
+            </div>
           </div>
           
-          <!-- Quadrant filter -->
-          <div class="flex items-center gap-2">
-            <label class="text-sm opacity-60">Quadrant:</label>
-            <select x-model="filterQuadrant" 
-                    class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
-                    style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
-              <option value="">All</option>
-              <template x-for="quad in quadrants" :key="quad.id">
-                <option :value="quad.id" x-text="quad.label"></option>
-              </template>
-              <option value="none">Unassigned</option>
-            </select>
-          </div>
-          
-          <!-- Due date filter -->
-          <div class="flex items-center gap-2">
-            <label class="text-sm opacity-60">Due Date:</label>
-            <select x-model="filterHasDueDate" 
-                    class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
-                    style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
-              <option value="">All</option>
-              <option value="yes">Has due date</option>
-              <option value="no">No due date</option>
-              <option value="overdue">Overdue</option>
-            </select>
-          </div>
-          
-          <!-- Blocked filter -->
-          <div class="flex items-center gap-2">
-            <label class="text-sm opacity-60">Blocked:</label>
-            <select x-model="filterBlocked" 
-                    class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
-                    style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
-              <option value="">All</option>
-              <option value="blocked">Blocked tasks</option>
-              <option value="hasBlocker">With blocker info</option>
-              <option value="blockerResolved">Blocker resolved</option>
-            </select>
-          </div>
-          
-          <!-- Tag filter -->
-          <div class="flex items-center gap-2" x-show="getAllTags().length > 0">
-            <label class="text-sm opacity-60">Tag:</label>
-            <select x-model="filterTag" 
-                    class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
-                    style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
-              <option value="">All</option>
-              <template x-for="tag in getAllTags()" :key="tag">
-                <option :value="tag" x-text="tag"></option>
-              </template>
-            </select>
-          </div>
-          
-          <!-- Archived filter -->
-          <div class="flex items-center gap-2">
-            <label class="text-sm opacity-60">Archived:</label>
-            <select x-model="showArchived" 
-                    class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
-                    style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
-              <option value="">Active only</option>
-              <option value="include">Include archived</option>
-              <option value="only">Archived only</option>
-            </select>
+          <!-- Active filters summary -->
+          <div x-show="filterStatus || filterQuadrant || filterHasDueDate || filterBlocked || filterTag || showArchived" 
+               class="flex flex-wrap gap-2 pt-2 border-t" style="border-color: var(--sn-stylekit-border-color);">
+            <span class="text-xs opacity-60">Active filters:</span>
+            <span x-show="filterStatus" class="text-xs px-2 py-1 rounded-full" style="background: var(--sn-stylekit-accent-color); color: white;">
+              Status: <span x-text="statuses.find(function(s) { return s.id === filterStatus; })?.label || filterStatus"></span>
+            </span>
+            <span x-show="filterQuadrant" class="text-xs px-2 py-1 rounded-full" style="background: var(--sn-stylekit-accent-color); color: white;">
+              Quadrant: <span x-text="filterQuadrant === 'none' ? 'Unassigned' : (quadrants.find(function(q) { return q.id === filterQuadrant; })?.label || filterQuadrant)"></span>
+            </span>
+            <span x-show="filterHasDueDate" class="text-xs px-2 py-1 rounded-full" style="background: var(--sn-stylekit-accent-color); color: white;">
+              Due: <span x-text="filterHasDueDate"></span>
+            </span>
+            <span x-show="filterBlocked" class="text-xs px-2 py-1 rounded-full" style="background: var(--sn-stylekit-accent-color); color: white;">
+              <span x-text="filterBlocked"></span>
+            </span>
+            <span x-show="filterTag" class="text-xs px-2 py-1 rounded-full" style="background: var(--sn-stylekit-accent-color); color: white;">
+              Tag: <span x-text="filterTag"></span>
+            </span>
+            <span x-show="showArchived" class="text-xs px-2 py-1 rounded-full" style="background: var(--sn-stylekit-accent-color); color: white;">
+              <span x-text="showArchived === 'include' ? 'Incl. archived' : 'Archived only'"></span>
+            </span>
           </div>
         </div>
-      </div>
-      
-      <!-- Results count -->
-      <div class="text-sm opacity-60 mb-3">
-        <span x-text="getFilteredTasks().length"></span> task(s) found
-        <span x-show="showArchived === 'include'"> (including archived)</span>
-        <span x-show="showArchived === 'only'"> (archived only)</span>
       </div>
       
       <!-- Search results -->
@@ -1468,57 +1517,239 @@
         </div>
       </div>
       
-      <!-- Daily completions calendar heatmap -->
+      <!-- Burnup Chart -->
       <div class="p-4 rounded-lg border" style="border-color: var(--sn-stylekit-border-color); background: var(--sn-stylekit-contrast-background-color);">
-        <div class="flex items-center justify-between mb-4">
-          <div class="text-sm font-medium">Completions Calendar</div>
-          <div class="flex items-center gap-2 text-xs opacity-60">
-            <span>Less</span>
-            <div class="flex gap-1">
-              <div class="w-8 h-8 rounded" style="background: var(--sn-stylekit-border-color);"></div>
-              <div class="w-8 h-8 rounded" style="background: var(--sn-stylekit-accent-color); opacity: 0.3;"></div>
-              <div class="w-8 h-8 rounded" style="background: var(--sn-stylekit-accent-color); opacity: 0.6;"></div>
-              <div class="w-8 h-8 rounded" style="background: var(--sn-stylekit-accent-color);"></div>
-            </div>
-            <span>More</span>
-          </div>
-        </div>
-        
-        <div class="overflow-x-auto">
-          <!-- Month labels row -->
-          <div class="flex gap-2 mb-2" style="margin-left: 52px;">
-            <template x-for="(week, weekIndex) in getCalendarHeatmapData()" :key="'month-' + weekIndex">
-              <div class="text-xs opacity-60 font-medium" style="min-width: 48px; width: 48px;">
-                <span x-text="week.monthLabel || ''"></span>
-              </div>
-            </template>
-          </div>
+        <!-- Header with controls -->
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <div class="text-sm font-medium">Task Burnup Chart</div>
           
-          <!-- Calendar grid with day labels -->
-          <div class="flex flex-col gap-2">
-            <template x-for="(dayName, dayIndex) in ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']" :key="dayName">
-              <div class="flex gap-2 items-center">
-                <!-- Day label -->
-                <div class="text-xs opacity-60 font-medium" style="width: 36px; text-align: right;" x-text="dayName"></div>
-                <!-- Day cells for each week -->
-                <template x-for="(week, weekIndex) in getCalendarHeatmapData()" :key="'cell-' + dayIndex + '-' + weekIndex">
-                  <div class="rounded flex items-center justify-center text-sm font-bold cursor-default"
-                       style="width: 48px; height: 48px;"
-                       :style="week.days[dayIndex].count === 0 
-                         ? 'background: var(--sn-stylekit-border-color); opacity: 0.4;' 
-                         : 'background: var(--sn-stylekit-accent-color); opacity: ' + (0.35 + (week.days[dayIndex].count / getMaxCalendarCompletion()) * 0.65) + '; color: white;'"
-                       :title="week.days[dayIndex].date"
-                       x-text="week.days[dayIndex].count > 0 ? week.days[dayIndex].count : ''">
-                  </div>
-                </template>
-              </div>
-            </template>
+          <div class="flex flex-wrap items-center gap-4">
+            <!-- Daily Goal input -->
+            <div class="flex items-center gap-2">
+              <label class="text-xs opacity-60">Daily Goal:</label>
+              <input type="number" 
+                     x-model.number="dailyGoal" 
+                     @change="save()"
+                     min="1" 
+                     max="100"
+                     class="w-16 px-2 py-1 rounded border text-sm text-center"
+                     style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);"
+                     :disabled="locked">
+            </div>
+            
+            <!-- Aggregation toggle -->
+            <div class="flex items-center gap-2">
+              <label class="text-xs opacity-60">View:</label>
+              <select x-model="chartAggregation"
+                      class="px-2 py-1 rounded border text-sm"
+                      style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                <option value="auto">Auto</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </div>
           </div>
         </div>
         
-        <!-- Summary -->
-        <div class="mt-4 text-sm opacity-60">
-          <span x-text="getTotalCompletionsInPeriod()"></span> task(s) completed in this period
+        <!-- Legend -->
+        <div class="flex flex-wrap items-center gap-4 mb-4 text-xs">
+          <div class="flex items-center gap-2">
+            <div class="w-4 h-1 rounded" style="background: #22c55e;"></div>
+            <span class="opacity-80">Completed</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="w-4 h-1 rounded" style="background: #3b82f6;"></div>
+            <span class="opacity-80">Created</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="w-4 h-0.5 rounded" style="background: #f59e0b; border-top: 2px dashed #f59e0b;"></div>
+            <span class="opacity-80">Goal Pace</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="w-4 h-3 rounded opacity-30" style="background: #22c55e;"></div>
+            <span class="opacity-80">Ahead</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="w-4 h-3 rounded opacity-30" style="background: #ef4444;"></div>
+            <span class="opacity-80">Behind</span>
+          </div>
+        </div>
+        
+        <!-- SVG Chart Container -->
+        <div class="relative" style="height: 280px;">
+          <svg x-ref="burnupChart" 
+               width="100%" 
+               height="100%" 
+               viewBox="0 0 600 280" 
+               preserveAspectRatio="xMidYMid meet"
+               style="overflow: visible;">
+            
+            <!-- Background grid lines -->
+            <g>
+              <!-- Horizontal grid lines -->
+              <line x1="50" y1="40" x2="580" y2="40" stroke="var(--sn-stylekit-border-color)" stroke-width="1" stroke-dasharray="4,4" opacity="0.5"></line>
+              <line x1="50" y1="88" x2="580" y2="88" stroke="var(--sn-stylekit-border-color)" stroke-width="1" stroke-dasharray="4,4" opacity="0.5"></line>
+              <line x1="50" y1="136" x2="580" y2="136" stroke="var(--sn-stylekit-border-color)" stroke-width="1" stroke-dasharray="4,4" opacity="0.5"></line>
+              <line x1="50" y1="184" x2="580" y2="184" stroke="var(--sn-stylekit-border-color)" stroke-width="1" stroke-dasharray="4,4" opacity="0.5"></line>
+              <line x1="50" y1="232" x2="580" y2="232" stroke="var(--sn-stylekit-border-color)" stroke-width="1" stroke-dasharray="4,4" opacity="0.5"></line>
+              
+              <!-- Y-axis labels -->
+              <text x="45" y="236" text-anchor="end" fill="var(--sn-stylekit-foreground-color)" font-size="10" opacity="0.6" x-text="0"></text>
+              <text x="45" y="188" text-anchor="end" fill="var(--sn-stylekit-foreground-color)" font-size="10" opacity="0.6" x-text="Math.round(getMaxChartValue() / 4)"></text>
+              <text x="45" y="140" text-anchor="end" fill="var(--sn-stylekit-foreground-color)" font-size="10" opacity="0.6" x-text="Math.round(getMaxChartValue() / 2)"></text>
+              <text x="45" y="92" text-anchor="end" fill="var(--sn-stylekit-foreground-color)" font-size="10" opacity="0.6" x-text="Math.round(getMaxChartValue() * 3 / 4)"></text>
+              <text x="45" y="44" text-anchor="end" fill="var(--sn-stylekit-foreground-color)" font-size="10" opacity="0.6" x-text="getMaxChartValue()"></text>
+              
+              <!-- Axes -->
+              <line x1="50" y1="232" x2="580" y2="232" stroke="var(--sn-stylekit-border-color)" stroke-width="1"></line>
+              <line x1="50" y1="40" x2="50" y2="232" stroke="var(--sn-stylekit-border-color)" stroke-width="1"></line>
+            </g>
+            
+            <!-- Chart content - only show when we have data -->
+            <g x-show="getBurnupChartData().dates.length > 0">
+              <!-- Shaded zone between completed and goal -->
+              <polygon :points="(function() {
+                  var chartData = getBurnupChartData();
+                  var maxY = getMaxChartValue();
+                  if (chartData.dates.length === 0) return '0,0';
+                  var pts = [];
+                  var xStep = chartData.dates.length > 1 ? 530 / (chartData.dates.length - 1) : 0;
+                  var yScale = maxY > 0 ? 192 / maxY : 1;
+                  
+                  for (var i = 0; i < chartData.dates.length; i++) {
+                    var x = 50 + (i * xStep);
+                    var completedY = 232 - (chartData.completed[i] * yScale);
+                    pts.push(x + ',' + completedY);
+                  }
+                  for (var j = chartData.dates.length - 1; j >= 0; j--) {
+                    var x2 = 50 + (j * xStep);
+                    var goalY = 232 - (chartData.goal[j] * yScale);
+                    pts.push(x2 + ',' + goalY);
+                  }
+                  return pts.join(' ');
+                })()"
+                :fill="(function() {
+                  var chartData = getBurnupChartData();
+                  if (chartData.completed.length === 0) return 'transparent';
+                  return chartData.completed[chartData.completed.length - 1] >= chartData.goal[chartData.goal.length - 1] ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)';
+                })()">
+              </polygon>
+              
+              <!-- Goal pace line (dashed) -->
+              <polyline :points="(function() {
+                  var chartData = getBurnupChartData();
+                  var maxY = getMaxChartValue();
+                  if (chartData.dates.length < 2) return '0,0';
+                  var pts = [];
+                  var xStep = 530 / (chartData.dates.length - 1);
+                  var yScale = maxY > 0 ? 192 / maxY : 1;
+                  for (var i = 0; i < chartData.dates.length; i++) {
+                    var x = 50 + (i * xStep);
+                    var y = 232 - (chartData.goal[i] * yScale);
+                    pts.push(x + ',' + y);
+                  }
+                  return pts.join(' ');
+                })()"
+                fill="none"
+                stroke="#f59e0b"
+                stroke-width="2"
+                stroke-dasharray="6,4">
+              </polyline>
+              
+              <!-- Created line -->
+              <polyline :points="(function() {
+                  var chartData = getBurnupChartData();
+                  var maxY = getMaxChartValue();
+                  if (chartData.dates.length < 2) return '0,0';
+                  var pts = [];
+                  var xStep = 530 / (chartData.dates.length - 1);
+                  var yScale = maxY > 0 ? 192 / maxY : 1;
+                  for (var i = 0; i < chartData.dates.length; i++) {
+                    var x = 50 + (i * xStep);
+                    var y = 232 - (chartData.created[i] * yScale);
+                    pts.push(x + ',' + y);
+                  }
+                  return pts.join(' ');
+                })()"
+                fill="none"
+                stroke="#3b82f6"
+                stroke-width="2.5">
+              </polyline>
+              
+              <!-- Completed line -->
+              <polyline :points="(function() {
+                  var chartData = getBurnupChartData();
+                  var maxY = getMaxChartValue();
+                  if (chartData.dates.length < 2) return '0,0';
+                  var pts = [];
+                  var xStep = 530 / (chartData.dates.length - 1);
+                  var yScale = maxY > 0 ? 192 / maxY : 1;
+                  for (var i = 0; i < chartData.dates.length; i++) {
+                    var x = 50 + (i * xStep);
+                    var y = 232 - (chartData.completed[i] * yScale);
+                    pts.push(x + ',' + y);
+                  }
+                  return pts.join(' ');
+                })()"
+                fill="none"
+                stroke="#22c55e"
+                stroke-width="2.5">
+              </polyline>
+            </g>
+            
+            <!-- Data points for completed - rendered separately -->
+            <g x-show="getBurnupChartData().dates.length > 0">
+              <circle x-bind:style="'display:' + (getBurnupChartData().dates.length > 0 ? 'block' : 'none')"
+                      x-bind:cx="(function() { var d = getBurnupChartData(); return d.dates.length > 0 ? 50 + 0 * (d.dates.length > 1 ? 530 / (d.dates.length - 1) : 0) : 0; })()"
+                      x-bind:cy="(function() { var d = getBurnupChartData(); var m = getMaxChartValue(); return d.dates.length > 0 ? 232 - (d.completed[0] * (m > 0 ? 192 / m : 1)) : 0; })()"
+                      r="4" fill="#22c55e" stroke="var(--sn-stylekit-background-color)" stroke-width="2"></circle>
+            </g>
+            
+            <!-- X-axis labels -->
+            <g x-show="getBurnupChartData().dates.length > 0">
+              <text x-bind:x="(function() { var d = getBurnupChartData(); return d.dates.length > 0 ? 50 : 0; })()"
+                    y="256" text-anchor="middle" fill="var(--sn-stylekit-foreground-color)" font-size="9" opacity="0.6"
+                    x-text="getBurnupChartData().labels[0] || ''"></text>
+              <text x-bind:x="(function() { var d = getBurnupChartData(); return d.dates.length > 1 ? 50 + 530 : 0; })()"
+                    y="256" text-anchor="middle" fill="var(--sn-stylekit-foreground-color)" font-size="9" opacity="0.6"
+                    x-text="getBurnupChartData().labels[getBurnupChartData().labels.length - 1] || ''"></text>
+              <text x-bind:x="(function() { var d = getBurnupChartData(); return d.dates.length > 2 ? 50 + 265 : 0; })()"
+                    x-show="getBurnupChartData().dates.length > 2"
+                    y="256" text-anchor="middle" fill="var(--sn-stylekit-foreground-color)" font-size="9" opacity="0.6"
+                    x-text="(function() { var d = getBurnupChartData(); return d.labels[Math.floor(d.labels.length / 2)] || ''; })()"></text>
+            </g>
+            
+            <!-- No data message -->
+            <g x-show="getBurnupChartData().dates.length === 0">
+              <text x="315" y="140" text-anchor="middle" fill="var(--sn-stylekit-foreground-color)" font-size="14" opacity="0.5">No data for selected period</text>
+            </g>
+          </svg>
+        </div>
+        
+        <!-- Summary stats -->
+        <div class="mt-4 flex flex-wrap gap-4 text-xs opacity-70">
+          <span>
+            <span class="font-medium" style="color: #22c55e;" x-text="getBurnupChartData().completed.length > 0 ? getBurnupChartData().completed[getBurnupChartData().completed.length - 1] : 0"></span> completed
+          </span>
+          <span>
+            <span class="font-medium" style="color: #3b82f6;" x-text="getBurnupChartData().created.length > 0 ? getBurnupChartData().created[getBurnupChartData().created.length - 1] : 0"></span> created
+          </span>
+          <span>
+            <span class="font-medium" style="color: #f59e0b;" x-text="getBurnupChartData().goal.length > 0 ? getBurnupChartData().goal[getBurnupChartData().goal.length - 1] : 0"></span> goal
+          </span>
+          <span :style="(function() {
+                  var data = getBurnupChartData();
+                  if (data.completed.length === 0 || data.goal.length === 0) return 'color: #6b7280;';
+                  return data.completed[data.completed.length - 1] >= data.goal[data.goal.length - 1] ? 'color: #22c55e;' : 'color: #ef4444;';
+                })()">
+            <span x-text="(function() {
+              var data = getBurnupChartData();
+              if (data.completed.length === 0 || data.goal.length === 0) return '—';
+              var diff = data.completed[data.completed.length - 1] - data.goal[data.goal.length - 1];
+              return diff >= 0 ? '+' + diff + ' ahead' : diff + ' behind';
+            })()"></span>
+          </span>
         </div>
       </div>
     </main>
@@ -1586,11 +1817,17 @@
         filterHasDueDate: '',
         filterBlocked: '',
         filterTag: '',
+        showSearchFilters: false,
+        searchSortBy: 'createdAt',
         
         // Analytics period
         analyticsPeriod: 'week',
         analyticsStartDate: '',
         analyticsEndDate: '',
+        
+        // Burnup chart settings
+        dailyGoal: 5,
+        chartAggregation: 'auto',
         
         // Sort order control - prevents auto-sort on weight change
         sortedTaskIds: [],
@@ -1614,6 +1851,9 @@
                     var data = JSON.parse(text);
                     if (data && data.version === 1 && Array.isArray(data.items)) {
                       self.items = data.items;
+                      if (typeof data.dailyGoal === 'number') {
+                        self.dailyGoal = data.dailyGoal;
+                      }
                     }
                   } catch (e) {
                     console.log('[Productivity] Parse error:', e);
@@ -1658,6 +1898,9 @@
               var data = JSON.parse(saved);
               if (data && data.version === 1 && Array.isArray(data.items)) {
                 this.items = data.items;
+                if (typeof data.dailyGoal === 'number') {
+                  this.dailyGoal = data.dailyGoal;
+                }
               }
             }
           } catch (e) {}
@@ -1666,7 +1909,7 @@
         
         saveToStorage() {
           try {
-            localStorage.setItem('sn-productivity-items', JSON.stringify({ version: 1, items: this.items }));
+            localStorage.setItem('sn-productivity-items', JSON.stringify({ version: 1, items: this.items, dailyGoal: this.dailyGoal }));
           } catch (e) {}
         },
         
@@ -1674,7 +1917,7 @@
           this.saveToStorage();
           if (window.snApi && this.inStandardNotes) {
             try {
-              snApi.text = JSON.stringify({ version: 1, items: this.items });
+              snApi.text = JSON.stringify({ version: 1, items: this.items, dailyGoal: this.dailyGoal });
               snApi.preview = this.getPreview();
             } catch (e) {
               console.log('[Productivity] Save error:', e);
@@ -2201,7 +2444,7 @@
           var self = this;
           var query = this.searchQuery.toLowerCase().trim();
           
-          return this.items.filter(function(t) {
+          var filtered = this.items.filter(function(t) {
             // Archived filter: '' = active only, 'include' = all, 'only' = archived only
             if (self.showArchived === '') {
               if (t.archived) return false;
@@ -2249,7 +2492,40 @@
             if (self.filterTag && !(t.tags || []).includes(self.filterTag)) return false;
             
             return true;
-          }).sort(function(a, b) { return b.weight - a.weight; });
+          });
+          
+          // Sort based on searchSortBy
+          var sortBy = self.searchSortBy;
+          return filtered.sort(function(a, b) {
+            if (sortBy === 'createdAt') {
+              // Newest first
+              var aDate = a.createdAt || '';
+              var bDate = b.createdAt || '';
+              return bDate.localeCompare(aDate);
+            } else if (sortBy === 'createdAtAsc') {
+              // Oldest first
+              var aDate = a.createdAt || '';
+              var bDate = b.createdAt || '';
+              return aDate.localeCompare(bDate);
+            } else if (sortBy === 'dueDate') {
+              // Earliest due date first, no due date at end
+              if (!a.dueDate && !b.dueDate) return 0;
+              if (!a.dueDate) return 1;
+              if (!b.dueDate) return -1;
+              return a.dueDate.localeCompare(b.dueDate);
+            } else if (sortBy === 'weight') {
+              return b.weight - a.weight;
+            } else if (sortBy === 'status') {
+              var aIdx = self.statuses.findIndex(function(s) { return s.id === (a.status || self.defaultStatus); });
+              var bIdx = self.statuses.findIndex(function(s) { return s.id === (b.status || self.defaultStatus); });
+              return aIdx - bIdx;
+            } else if (sortBy === 'completedAt') {
+              var aDate = a.completedAt || '';
+              var bDate = b.completedAt || '';
+              return bDate.localeCompare(aDate);
+            }
+            return 0;
+          });
         },
         
         clearFilters() {
@@ -2260,6 +2536,7 @@
           this.filterBlocked = '';
           this.filterTag = '';
           this.showArchived = '';
+          this.searchSortBy = 'createdAt';
         },
         
         // Export CSV function
@@ -2561,7 +2838,13 @@
           }).length;
         },
         
-        getCalendarHeatmapData() {
+        getChartAggregationLevel() {
+          // If manual override, use that
+          if (this.chartAggregation !== 'auto') {
+            return this.chartAggregation;
+          }
+          
+          // Calculate period length and determine aggregation
           var now = dayjs();
           var start, end;
           
@@ -2572,77 +2855,27 @@
             start = now.subtract(6, 'day');
             end = now;
           } else {
+            // month
             start = now.subtract(29, 'day');
             end = now;
           }
           
-          // Extend start to beginning of its week (Sunday)
-          var calStart = start.startOf('week');
-          // Extend end to end of its week (Saturday)
-          var calEnd = end.endOf('week');
+          var daysDiff = end.diff(start, 'day');
           
-          // Build completion count map
-          var completionMap = {};
-          var self = this;
-          this.items.forEach(function(t) {
-            if (t.completedAt) {
-              var dateStr = dayjs(t.completedAt).format('YYYY-MM-DD');
-              completionMap[dateStr] = (completionMap[dateStr] || 0) + 1;
-            }
-          });
-          
-          // Build weeks array
-          var weeks = [];
-          var currentDay = calStart;
-          var currentWeek = null;
-          var lastMonth = -1;
-          
-          while (currentDay.isBefore(calEnd) || currentDay.isSame(calEnd, 'day')) {
-            var dayOfWeek = currentDay.day(); // 0 = Sunday
-            
-            if (dayOfWeek === 0) {
-              // Start new week
-              currentWeek = { 
-                monthLabel: '', 
-                days: [] 
-              };
-              weeks.push(currentWeek);
-              
-              // Add month label if this is a new month
-              var thisMonth = currentDay.month();
-              if (thisMonth !== lastMonth) {
-                currentWeek.monthLabel = currentDay.format('MMM');
-                lastMonth = thisMonth;
-              }
-            }
-            
-            var dateStr = currentDay.format('YYYY-MM-DD');
-            var isInRange = (currentDay.isAfter(start.subtract(1, 'day')) && currentDay.isBefore(end.add(1, 'day')));
-            
-            currentWeek.days.push({
-              date: dateStr,
-              count: isInRange ? (completionMap[dateStr] || 0) : 0,
-              inRange: isInRange
-            });
-            
-            currentDay = currentDay.add(1, 'day');
+          // 3+ months (90 days) -> monthly
+          if (daysDiff >= 90) {
+            return 'monthly';
           }
-          
-          return weeks;
+          // More than 30 days -> weekly  
+          if (daysDiff > 30) {
+            return 'weekly';
+          }
+          // Less than 30 days -> daily
+          return 'daily';
         },
         
-        getMaxCalendarCompletion() {
-          var max = 1;
-          var data = this.getCalendarHeatmapData();
-          data.forEach(function(week) {
-            week.days.forEach(function(day) {
-              if (day.count > max) max = day.count;
-            });
-          });
-          return max;
-        },
-        
-        getTotalCompletionsInPeriod() {
+        getBurnupChartData() {
+          var self = this;
           var now = dayjs();
           var start, end;
           
@@ -2653,15 +2886,177 @@
             start = now.subtract(6, 'day').startOf('day');
             end = now.endOf('day');
           } else {
+            // month
             start = now.subtract(29, 'day').startOf('day');
             end = now.endOf('day');
           }
           
-          return this.items.filter(function(t) {
-            if (!t.completedAt) return false;
-            var completed = dayjs(t.completedAt);
-            return completed.isAfter(start.subtract(1, 'second')) && completed.isBefore(end.add(1, 'second'));
-          }).length;
+          var aggregation = this.getChartAggregationLevel();
+          
+          // Build daily maps for created and completed tasks
+          var createdMap = {};
+          var completedMap = {};
+          
+          this.items.forEach(function(t) {
+            if (t.createdAt) {
+              var createdDate = dayjs(t.createdAt).format('YYYY-MM-DD');
+              createdMap[createdDate] = (createdMap[createdDate] || 0) + 1;
+            }
+            if (t.completedAt) {
+              var completedDate = dayjs(t.completedAt).format('YYYY-MM-DD');
+              completedMap[completedDate] = (completedMap[completedDate] || 0) + 1;
+            }
+          });
+          
+          // Build data points based on aggregation level
+          var dates = [];
+          var labels = [];
+          var created = [];
+          var completed = [];
+          var goal = [];
+          
+          var currentDate = start;
+          var cumulativeCreated = 0;
+          var cumulativeCompleted = 0;
+          var dataPointIndex = 0;
+          
+          // For calculating cumulative totals before the start date
+          var priorCreated = 0;
+          var priorCompleted = 0;
+          this.items.forEach(function(t) {
+            if (t.createdAt && dayjs(t.createdAt).isBefore(start)) {
+              priorCreated++;
+            }
+            if (t.completedAt && dayjs(t.completedAt).isBefore(start)) {
+              priorCompleted++;
+            }
+          });
+          cumulativeCreated = priorCreated;
+          cumulativeCompleted = priorCompleted;
+          
+          if (aggregation === 'monthly') {
+            // Group by month
+            var currentMonth = start.startOf('month');
+            var endMonth = end.endOf('month');
+            
+            while (currentMonth.isBefore(endMonth) || currentMonth.isSame(endMonth, 'month')) {
+              var monthStart = currentMonth.startOf('month');
+              var monthEnd = currentMonth.endOf('month');
+              
+              // Clamp to actual range
+              if (monthStart.isBefore(start)) monthStart = start;
+              if (monthEnd.isAfter(end)) monthEnd = end;
+              
+              var monthCreated = 0;
+              var monthCompleted = 0;
+              
+              var day = monthStart;
+              while (day.isBefore(monthEnd) || day.isSame(monthEnd, 'day')) {
+                var dateStr = day.format('YYYY-MM-DD');
+                monthCreated += (createdMap[dateStr] || 0);
+                monthCompleted += (completedMap[dateStr] || 0);
+                day = day.add(1, 'day');
+              }
+              
+              cumulativeCreated += monthCreated;
+              cumulativeCompleted += monthCompleted;
+              
+              dates.push(currentMonth.format('YYYY-MM'));
+              labels.push(currentMonth.format('MMM'));
+              created.push(cumulativeCreated);
+              completed.push(cumulativeCompleted);
+              
+              // Goal: daily goal * days in this period segment
+              var daysInSegment = monthEnd.diff(monthStart, 'day') + 1;
+              dataPointIndex++;
+              var totalDaysFromStart = monthEnd.diff(start, 'day') + 1;
+              goal.push(self.dailyGoal * totalDaysFromStart);
+              
+              currentMonth = currentMonth.add(1, 'month');
+            }
+          } else if (aggregation === 'weekly') {
+            // Group by week
+            var currentWeek = start.startOf('week');
+            var endWeek = end.endOf('week');
+            
+            while (currentWeek.isBefore(endWeek) || currentWeek.isSame(endWeek, 'week')) {
+              var weekStart = currentWeek.startOf('week');
+              var weekEnd = currentWeek.endOf('week');
+              
+              // Clamp to actual range
+              if (weekStart.isBefore(start)) weekStart = start;
+              if (weekEnd.isAfter(end)) weekEnd = end;
+              
+              var weekCreated = 0;
+              var weekCompleted = 0;
+              
+              var day = weekStart;
+              while (day.isBefore(weekEnd) || day.isSame(weekEnd, 'day')) {
+                var dateStr = day.format('YYYY-MM-DD');
+                weekCreated += (createdMap[dateStr] || 0);
+                weekCompleted += (completedMap[dateStr] || 0);
+                day = day.add(1, 'day');
+              }
+              
+              cumulativeCreated += weekCreated;
+              cumulativeCompleted += weekCompleted;
+              
+              dates.push(weekStart.format('YYYY-MM-DD'));
+              labels.push(weekStart.format('M/D'));
+              created.push(cumulativeCreated);
+              completed.push(cumulativeCompleted);
+              
+              // Goal: daily goal * days from start to end of this week
+              var totalDaysFromStart = weekEnd.diff(start, 'day') + 1;
+              goal.push(self.dailyGoal * totalDaysFromStart);
+              
+              currentWeek = currentWeek.add(1, 'week');
+            }
+          } else {
+            // Daily aggregation
+            while (currentDate.isBefore(end) || currentDate.isSame(end, 'day')) {
+              var dateStr = currentDate.format('YYYY-MM-DD');
+              
+              cumulativeCreated += (createdMap[dateStr] || 0);
+              cumulativeCompleted += (completedMap[dateStr] || 0);
+              
+              dates.push(dateStr);
+              labels.push(currentDate.format('M/D'));
+              created.push(cumulativeCreated);
+              completed.push(cumulativeCompleted);
+              
+              // Goal: daily goal * day number (1-indexed)
+              dataPointIndex++;
+              goal.push(self.dailyGoal * dataPointIndex);
+              
+              currentDate = currentDate.add(1, 'day');
+            }
+          }
+          
+          return {
+            dates: dates,
+            labels: labels,
+            created: created,
+            completed: completed,
+            goal: goal
+          };
+        },
+        
+        getMaxChartValue() {
+          var data = this.getBurnupChartData();
+          var max = 10; // minimum scale
+          
+          // Find max across all three series
+          data.created.forEach(function(v) { if (v > max) max = v; });
+          data.completed.forEach(function(v) { if (v > max) max = v; });
+          data.goal.forEach(function(v) { if (v > max) max = v; });
+          
+          // Round up to nice number
+          if (max <= 10) return 10;
+          if (max <= 25) return 25;
+          if (max <= 50) return 50;
+          if (max <= 100) return 100;
+          return Math.ceil(max / 50) * 50;
         }
       };
     }
