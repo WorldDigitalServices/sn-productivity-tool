@@ -487,11 +487,27 @@
                     :style="viewMode === 'matrix' ? 'background: var(--sn-stylekit-accent-color); color: white;' : 'background: var(--sn-stylekit-contrast-background-color);'">
               Matrix
             </button>
+            <button @click.prevent="viewMode = 'calendar'" 
+                    class="px-3 py-2 text-sm min-h-[44px] transition-colors"
+                    :style="viewMode === 'calendar' ? 'background: var(--sn-stylekit-accent-color); color: white;' : 'background: var(--sn-stylekit-contrast-background-color);'">
+              Calendar
+            </button>
+            <button @click.prevent="viewMode = 'search'" 
+                    class="px-3 py-2 text-sm min-h-[44px] transition-colors"
+                    :style="viewMode === 'search' ? 'background: var(--sn-stylekit-accent-color); color: white;' : 'background: var(--sn-stylekit-contrast-background-color);'">
+              Search
+            </button>
+            <button @click.prevent="viewMode = 'analytics'" 
+                    class="px-3 py-2 text-sm min-h-[44px] transition-colors"
+                    :style="viewMode === 'analytics' ? 'background: var(--sn-stylekit-accent-color); color: white;' : 'background: var(--sn-stylekit-contrast-background-color);'">
+              Analytics
+            </button>
           </div>
           
-          <button x-show="viewMode === 'list'" @click.prevent="toggleSort()" 
-                  class="p-2 rounded-lg hover:opacity-80 transition-opacity min-w-[44px] min-h-[44px] flex items-center justify-center"
-                  :title="sortBy === 'weight' ? 'Sort by due date' : 'Sort by weight'"
+          <button @click.prevent="viewMode === 'list' && toggleSort()" 
+                  class="p-2 rounded-lg transition-opacity min-w-[44px] min-h-[44px] flex items-center justify-center"
+                  :class="viewMode === 'list' ? 'hover:opacity-80' : 'opacity-40 cursor-default'"
+                  :title="viewMode === 'list' ? (sortBy === 'weight' ? 'Sort by due date' : 'Sort by weight') : 'Sort (list view only)'"
                   style="background: var(--sn-stylekit-contrast-background-color);">
             <svg x-show="sortBy === 'weight'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"/>
@@ -512,11 +528,61 @@
             </svg>
           </button>
           
+          <button x-show="completedCount > 0" @click.prevent="archiveCompleted()" 
+                  class="px-3 py-2 text-sm rounded-lg hover:opacity-80 transition-opacity min-h-[44px]"
+                  style="background: var(--sn-stylekit-contrast-background-color);"
+                  title="Archive completed tasks">
+            Archive
+          </button>
           <button x-show="completedCount > 0" @click.prevent="clearCompleted()" 
                   class="px-3 py-2 text-sm rounded-lg hover:opacity-80 transition-opacity min-h-[44px]"
                   style="background: var(--sn-stylekit-contrast-background-color);">
             Clear done
           </button>
+          <div class="relative" x-data="{ showImportExport: false }">
+            <button @click.prevent="showImportExport = !showImportExport" 
+                    @click.away="showImportExport = false"
+                    class="p-2 rounded-lg hover:opacity-80 transition-opacity min-w-[44px] min-h-[44px] flex items-center justify-center"
+                    style="background: var(--sn-stylekit-contrast-background-color);"
+                    title="Import/Export">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+            </button>
+            <!-- Dropdown menu -->
+            <div x-show="showImportExport" 
+                 x-transition:enter="transition ease-out duration-100"
+                 x-transition:enter-start="opacity-0 scale-95"
+                 x-transition:enter-end="opacity-100 scale-100"
+                 x-transition:leave="transition ease-in duration-75"
+                 x-transition:leave-start="opacity-100 scale-100"
+                 x-transition:leave-end="opacity-0 scale-95"
+                 class="absolute right-0 top-full mt-1 w-40 rounded-lg shadow-lg border z-50"
+                 style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color);">
+              <button @click.prevent="exportCSV(); showImportExport = false" 
+                      class="w-full px-4 py-2 text-sm text-left hover:opacity-80 flex items-center gap-2 rounded-t-lg"
+                      style="background: var(--sn-stylekit-background-color);">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                Export CSV
+              </button>
+              <button @click.prevent="$refs.importFile.click(); showImportExport = false" 
+                      class="w-full px-4 py-2 text-sm text-left hover:opacity-80 flex items-center gap-2 rounded-b-lg border-t"
+                      style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color);">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                </svg>
+                Import CSV
+              </button>
+            </div>
+            <!-- Hidden file input -->
+            <input type="file" 
+                   x-ref="importFile" 
+                   @change="importCSV($event)" 
+                   accept=".csv" 
+                   class="hidden">
+          </div>
         </div>
       </div>
     </header>
@@ -612,6 +678,54 @@
                    :style="'background: ' + getQuadrantColor(task.quadrant)"
                    x-text="getQuadrantLabel(task.quadrant)"></div>
               
+              <!-- Tags badges -->
+              <template x-for="tag in (task.tags || []).slice(0, 3)" :key="tag">
+                <span class="flex-shrink-0 text-xs px-2 py-0.5 rounded"
+                      style="background: var(--sn-stylekit-contrast-background-color); opacity: 0.8;"
+                      x-text="tag"></span>
+              </template>
+              <span x-show="(task.tags || []).length > 3" class="flex-shrink-0 text-xs opacity-60"
+                    x-text="'+' + ((task.tags || []).length - 3)"></span>
+              
+              <!-- Blocker indicator -->
+              <div x-show="(task.status === 'blocked') && (task.blockedByTaskId || task.blockerNote)"
+                   class="flex-shrink-0 relative group">
+                <span class="text-xs px-2 py-1 rounded cursor-help flex items-center gap-1"
+                      style="background: #ef4444; color: white;">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                  </svg>
+                  <span>Blocked</span>
+                </span>
+                <!-- Tooltip -->
+                <div class="absolute bottom-full left-0 mb-2 hidden group-hover:block z-50 w-64">
+                  <div class="p-2 rounded-lg shadow-lg text-xs"
+                       style="background: var(--sn-stylekit-foreground-color); color: var(--sn-stylekit-background-color);">
+                    <div x-show="task.blockedByTaskId" class="mb-1">
+                      <span class="font-semibold">Blocked by:</span>
+                      <span x-text="getTaskById(task.blockedByTaskId)?.text || 'Unknown task'"></span>
+                    </div>
+                    <div x-show="task.blockerNote">
+                      <span class="font-semibold">Note:</span>
+                      <span x-text="task.blockerNote"></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Inline priority controls -->
+              <div class="flex-shrink-0 flex items-center gap-1" x-show="!locked">
+                <button @click.prevent="decreaseWeight(task)" 
+                        :disabled="task.weight <= 1"
+                        class="w-6 h-6 rounded flex items-center justify-center text-sm font-bold disabled:opacity-30 hover:opacity-80"
+                        style="background: var(--sn-stylekit-contrast-background-color);">−</button>
+                <span class="w-5 text-center text-xs font-medium" x-text="task.weight"></span>
+                <button @click.prevent="increaseWeight(task)" 
+                        :disabled="task.weight >= 5"
+                        class="w-6 h-6 rounded flex items-center justify-center text-sm font-bold disabled:opacity-30 hover:opacity-80"
+                        style="background: var(--sn-stylekit-contrast-background-color);">+</button>
+              </div>
+              
               <button @click.prevent="toggleExpanded(task)" 
                       class="flex-shrink-0 p-1 rounded hover:opacity-80 min-w-[32px] min-h-[32px] flex items-center justify-center"
                       style="background: var(--sn-stylekit-contrast-background-color);">
@@ -639,6 +753,47 @@
                 </div>
               </div>
               
+              <!-- Blockers section - only shows when status is Blocked -->
+              <div x-show="task.status === 'blocked'" class="mb-3 p-3 rounded-lg border-2" style="border-color: #ef4444; background: rgba(239, 68, 68, 0.05);">
+                <div class="text-sm font-medium mb-2" style="color: #ef4444;">Blocker Details</div>
+                
+                <!-- Linked blocking task -->
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="text-sm opacity-60">Blocked by task:</span>
+                  <select x-model="task.blockedByTaskId" 
+                          @change="save()"
+                          :disabled="locked"
+                          class="flex-1 px-2 py-1 rounded border text-sm min-h-[32px]"
+                          style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                    <option :value="null">None</option>
+                    <template x-for="t in getBlockerTaskOptions(task.id)" :key="t.id">
+                      <option :value="t.id" x-text="t.text"></option>
+                    </template>
+                  </select>
+                </div>
+                
+                <!-- Blocker note -->
+                <div class="flex items-start gap-2">
+                  <span class="text-sm opacity-60 pt-1">Blocker note:</span>
+                  <textarea x-model="task.blockerNote"
+                            @input="save()"
+                            :disabled="locked"
+                            placeholder="Describe what's blocking this task..."
+                            rows="2"
+                            class="flex-1 px-2 py-1 rounded border text-sm resize-y"
+                            style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color); min-height: 40px;"></textarea>
+                </div>
+                
+                <!-- Show linked task status if one is selected -->
+                <div x-show="task.blockedByTaskId" class="mt-2 text-xs opacity-70">
+                  <span>Blocking task status: </span>
+                  <span class="px-1.5 py-0.5 rounded text-white"
+                        :style="'background: ' + getStatusColor(getTaskById(task.blockedByTaskId)?.status || defaultStatus)"
+                        x-text="getStatusLabel(getTaskById(task.blockedByTaskId)?.status || defaultStatus)"></span>
+                  <span x-show="getTaskById(task.blockedByTaskId)?.done" class="ml-1 text-green-600 font-medium">✓ Completed - consider unblocking!</span>
+                </div>
+              </div>
+              
               <!-- Eisenhower Quadrant selector -->
               <div class="flex items-center gap-2 mb-3 flex-wrap">
                 <span class="text-sm opacity-60">Quadrant:</span>
@@ -657,9 +812,9 @@
                 </div>
               </div>
               
-              <!-- Priority -->
+              <!-- "Day of" Priority -->
               <div class="flex items-center gap-2 mb-3">
-                <span class="text-sm opacity-60">Priority:</span>
+                <span class="text-sm opacity-60">"Day of" Priority:</span>
                 <button @click.prevent="decreaseWeight(task)" :disabled="locked || task.weight <= 1"
                         class="px-2 py-1 rounded text-sm disabled:opacity-30 min-w-[32px] min-h-[32px]"
                         style="background: var(--sn-stylekit-contrast-background-color);">−</button>
@@ -704,6 +859,45 @@
                        placeholder="e.g. 1h30m, 90m, 1:30"
                        class="px-2 py-1 rounded border text-sm w-32 min-h-[32px]"
                        style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+              </div>
+              
+              <!-- Notes/Description -->
+              <div class="mb-3">
+                <div class="text-sm opacity-60 mb-2">Notes:</div>
+                <textarea x-model="task.notes"
+                          @input="save()"
+                          :disabled="locked"
+                          placeholder="Add notes or context..."
+                          rows="3"
+                          class="w-full px-3 py-2 rounded border text-sm resize-y"
+                          style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color); min-height: 60px;"></textarea>
+              </div>
+              
+              <!-- Tags -->
+              <div class="mb-3">
+                <div class="text-sm opacity-60 mb-2">Tags:</div>
+                <div class="flex flex-wrap gap-1 mb-2">
+                  <template x-for="(tag, index) in (task.tags || [])" :key="index">
+                    <span class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs"
+                          style="background: var(--sn-stylekit-accent-color); color: white;">
+                      <span x-text="tag"></span>
+                      <button @click.prevent="removeTag(task, index)" :disabled="locked"
+                              class="hover:opacity-80 min-w-[16px] min-h-[16px]">&times;</button>
+                    </span>
+                  </template>
+                </div>
+                <div class="flex gap-2" x-show="!locked">
+                  <input type="text" 
+                         x-model="newTagText"
+                         @keydown.enter.prevent="addTag(task)"
+                         @keydown.comma.prevent="addTag(task)"
+                         placeholder="Add tag (enter or comma to add)"
+                         class="flex-1 px-2 py-1 rounded border text-sm min-h-[32px]"
+                         style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+                  <button @click.prevent="addTag(task)" :disabled="!newTagText.trim()"
+                          class="px-2 py-1 rounded text-sm disabled:opacity-50 min-h-[32px]" 
+                          style="background: var(--sn-stylekit-accent-color); color: white;">Add</button>
+                </div>
               </div>
               
               <div class="mb-3">
@@ -772,6 +966,15 @@
                         <span x-show="task.dueDate" x-text="getDueDateText(task.dueDate)"></span>
                         <span x-show="task.subtasks && task.subtasks.length > 0" x-text="getSubtaskProgress(task)"></span>
                       </div>
+                      <div x-show="task.tags && task.tags.length > 0" class="flex flex-wrap gap-1 mt-1">
+                        <template x-for="tag in (task.tags || []).slice(0, 2)" :key="tag">
+                          <span class="text-xs px-1.5 py-0.5 rounded opacity-70"
+                                style="background: var(--sn-stylekit-contrast-background-color);"
+                                x-text="tag"></span>
+                        </template>
+                        <span x-show="(task.tags || []).length > 2" class="text-xs opacity-50"
+                              x-text="'+' + ((task.tags || []).length - 2)"></span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -839,6 +1042,486 @@
         </div>
       </div>
     </main>
+    
+    <!-- Calendar view -->
+    <main x-show="viewMode === 'calendar'" class="flex-1 overflow-auto custom-scroll flex flex-col">
+      <!-- Calendar header -->
+      <div class="flex-shrink-0 px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--sn-stylekit-border-color);">
+        <div class="flex items-center gap-2">
+          <button @click.prevent="calendarPrev()" class="p-2 rounded-lg hover:opacity-80 min-w-[36px] min-h-[36px] flex items-center justify-center"
+                  style="background: var(--sn-stylekit-contrast-background-color);">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+            </svg>
+          </button>
+          <button @click.prevent="calendarToday()" class="px-3 py-1.5 rounded-lg text-sm hover:opacity-80"
+                  style="background: var(--sn-stylekit-contrast-background-color);">Today</button>
+          <button @click.prevent="calendarNext()" class="p-2 rounded-lg hover:opacity-80 min-w-[36px] min-h-[36px] flex items-center justify-center"
+                  style="background: var(--sn-stylekit-contrast-background-color);">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </button>
+          <span class="text-lg font-semibold ml-2" x-text="calendarTitle()"></span>
+        </div>
+        <div class="flex rounded-lg overflow-hidden border" style="border-color: var(--sn-stylekit-border-color);">
+          <button @click.prevent="calendarViewMode = 'month'" 
+                  class="px-3 py-1.5 text-sm transition-colors"
+                  :style="calendarViewMode === 'month' ? 'background: var(--sn-stylekit-accent-color); color: white;' : 'background: var(--sn-stylekit-contrast-background-color);'">
+            Month
+          </button>
+          <button @click.prevent="calendarViewMode = 'week'" 
+                  class="px-3 py-1.5 text-sm transition-colors"
+                  :style="calendarViewMode === 'week' ? 'background: var(--sn-stylekit-accent-color); color: white;' : 'background: var(--sn-stylekit-contrast-background-color);'">
+            Week
+          </button>
+        </div>
+      </div>
+      
+      <!-- Monthly calendar -->
+      <div x-show="calendarViewMode === 'month'" class="flex-1 flex flex-col p-2">
+        <!-- Day headers -->
+        <div class="grid grid-cols-7 gap-1 mb-1">
+          <template x-for="day in ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']">
+            <div class="text-center text-xs font-medium opacity-60 py-1" x-text="day"></div>
+          </template>
+        </div>
+        <!-- Calendar grid -->
+        <div class="grid grid-cols-7 gap-1 flex-1">
+          <template x-for="day in getMonthDays()" :key="day.date">
+            <div class="border rounded min-h-[80px] flex flex-col overflow-hidden"
+                 :class="day.isToday ? 'border-2' : ''"
+                 :style="day.isToday ? 'border-color: var(--sn-stylekit-accent-color);' : (day.isCurrentMonth ? 'border-color: var(--sn-stylekit-border-color);' : 'border-color: transparent; opacity: 0.4;')"
+                 @dragover.prevent="onDragOver($event)"
+                 @drop.prevent="onDropCalendar($event, day.date)">
+              <div class="text-xs p-1 flex justify-between items-center"
+                   :style="day.isToday ? 'background: var(--sn-stylekit-accent-color); color: white;' : ''">
+                <span x-text="day.dayNum"></span>
+              </div>
+              <div class="flex-1 p-0.5 overflow-y-auto custom-scroll space-y-0.5">
+                <template x-for="task in getTasksForDate(day.date)" :key="task.id">
+                  <div class="text-xs px-1 py-0.5 rounded truncate cursor-move"
+                       :style="'background: ' + getStatusColor(task.status || defaultStatus) + '20; border-left: 2px solid ' + getStatusColor(task.status || defaultStatus)"
+                       :class="{ 'line-through opacity-50': task.done }"
+                       draggable="true"
+                       @dragstart="onDragStart($event, task)"
+                       @dragend="onDragEnd($event)"
+                       x-text="task.text"></div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+      
+      <!-- Weekly calendar -->
+      <div x-show="calendarViewMode === 'week'" class="flex-1 flex flex-col p-2">
+        <div class="grid grid-cols-7 gap-2 flex-1">
+          <template x-for="day in getWeekDays()" :key="day.date">
+            <div class="border rounded flex flex-col overflow-hidden"
+                 :class="day.isToday ? 'border-2' : ''"
+                 :style="day.isToday ? 'border-color: var(--sn-stylekit-accent-color);' : 'border-color: var(--sn-stylekit-border-color);'"
+                 @dragover.prevent="onDragOver($event)"
+                 @drop.prevent="onDropCalendar($event, day.date)">
+              <div class="text-center py-2 border-b"
+                   :style="day.isToday ? 'background: var(--sn-stylekit-accent-color); color: white; border-color: var(--sn-stylekit-accent-color);' : 'border-color: var(--sn-stylekit-border-color);'">
+                <div class="text-xs opacity-70" x-text="day.dayName"></div>
+                <div class="text-lg font-semibold" x-text="day.dayNum"></div>
+              </div>
+              <div class="flex-1 p-1 overflow-y-auto custom-scroll space-y-1">
+                <template x-for="task in getTasksForDate(day.date)" :key="task.id">
+                  <div class="text-sm p-2 rounded cursor-move"
+                       :style="'background: ' + getStatusColor(task.status || defaultStatus) + '15; border-left: 3px solid ' + getStatusColor(task.status || defaultStatus)"
+                       :class="{ 'line-through opacity-50': task.done }"
+                       draggable="true"
+                       @dragstart="onDragStart($event, task)"
+                       @dragend="onDragEnd($event)">
+                    <div class="flex items-center gap-1">
+                      <div class="w-1.5 h-4 rounded-full flex-shrink-0" :class="'weight-' + task.weight"></div>
+                      <span class="truncate" x-text="task.text"></span>
+                    </div>
+                    <div x-show="task.estimatedMinutes || task.trackedSeconds" class="text-xs opacity-60 mt-1 ml-2.5">
+                      <span x-text="formatTrackedTime(task)"></span>
+                      <span x-show="task.estimatedMinutes">/ <span x-text="formatEstimate(task)"></span></span>
+                    </div>
+                  </div>
+                </template>
+                <div x-show="getTasksForDate(day.date).length === 0" class="text-center py-4 text-xs opacity-30">
+                  No tasks
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+      
+      <!-- Tasks without due date -->
+      <div x-show="getTasksWithoutDueDate().length > 0" class="flex-shrink-0 p-3 border-t" style="border-color: var(--sn-stylekit-border-color); background: var(--sn-stylekit-contrast-background-color);">
+        <div class="text-sm font-medium mb-2 opacity-60">No Due Date (<span x-text="getTasksWithoutDueDate().length"></span>) - drag to calendar to set</div>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="task in getTasksWithoutDueDate()" :key="task.id">
+            <div class="px-2 py-1 rounded text-xs cursor-move flex items-center gap-1"
+                 style="background: var(--sn-stylekit-background-color);"
+                 draggable="true"
+                 @dragstart="onDragStart($event, task)"
+                 @dragend="onDragEnd($event)">
+              <div class="w-1 h-3 rounded-full" :class="'weight-' + task.weight"></div>
+              <span :class="{ 'line-through opacity-50': task.done }" x-text="task.text"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </main>
+    
+    <!-- Search & Filter view -->
+    <main x-show="viewMode === 'search'" class="flex-1 overflow-y-auto custom-scroll px-4 py-3">
+      <!-- Search and filter controls -->
+      <div class="mb-4 space-y-3">
+        <div class="flex gap-2">
+          <input type="text" 
+                 x-model="searchQuery"
+                 placeholder="Search tasks, notes, tags..."
+                 class="flex-1 px-4 py-3 rounded-lg border text-base min-h-[44px]"
+                 style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+          <button @click.prevent="clearFilters()" 
+                  class="px-4 py-3 rounded-lg font-medium min-h-[44px]"
+                  style="background: var(--sn-stylekit-contrast-background-color);">
+            Clear
+          </button>
+        </div>
+        
+        <div class="flex flex-wrap gap-3">
+          <!-- Status filter -->
+          <div class="flex items-center gap-2">
+            <label class="text-sm opacity-60">Status:</label>
+            <select x-model="filterStatus" 
+                    class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
+                    style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+              <option value="">All</option>
+              <template x-for="status in statuses" :key="status.id">
+                <option :value="status.id" x-text="status.label"></option>
+              </template>
+            </select>
+          </div>
+          
+          <!-- Quadrant filter -->
+          <div class="flex items-center gap-2">
+            <label class="text-sm opacity-60">Quadrant:</label>
+            <select x-model="filterQuadrant" 
+                    class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
+                    style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+              <option value="">All</option>
+              <template x-for="quad in quadrants" :key="quad.id">
+                <option :value="quad.id" x-text="quad.label"></option>
+              </template>
+              <option value="none">Unassigned</option>
+            </select>
+          </div>
+          
+          <!-- Due date filter -->
+          <div class="flex items-center gap-2">
+            <label class="text-sm opacity-60">Due Date:</label>
+            <select x-model="filterHasDueDate" 
+                    class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
+                    style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+              <option value="">All</option>
+              <option value="yes">Has due date</option>
+              <option value="no">No due date</option>
+              <option value="overdue">Overdue</option>
+            </select>
+          </div>
+          
+          <!-- Blocked filter -->
+          <div class="flex items-center gap-2">
+            <label class="text-sm opacity-60">Blocked:</label>
+            <select x-model="filterBlocked" 
+                    class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
+                    style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+              <option value="">All</option>
+              <option value="blocked">Blocked tasks</option>
+              <option value="hasBlocker">With blocker info</option>
+              <option value="blockerResolved">Blocker resolved</option>
+            </select>
+          </div>
+          
+          <!-- Tag filter -->
+          <div class="flex items-center gap-2" x-show="getAllTags().length > 0">
+            <label class="text-sm opacity-60">Tag:</label>
+            <select x-model="filterTag" 
+                    class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
+                    style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+              <option value="">All</option>
+              <template x-for="tag in getAllTags()" :key="tag">
+                <option :value="tag" x-text="tag"></option>
+              </template>
+            </select>
+          </div>
+          
+          <!-- Archived filter -->
+          <div class="flex items-center gap-2">
+            <label class="text-sm opacity-60">Archived:</label>
+            <select x-model="showArchived" 
+                    class="px-3 py-2 rounded-lg border text-sm min-h-[36px]"
+                    style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+              <option value="">Active only</option>
+              <option value="include">Include archived</option>
+              <option value="only">Archived only</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Results count -->
+      <div class="text-sm opacity-60 mb-3">
+        <span x-text="getFilteredTasks().length"></span> task(s) found
+        <span x-show="showArchived === 'include'"> (including archived)</span>
+        <span x-show="showArchived === 'only'"> (archived only)</span>
+      </div>
+      
+      <!-- Search results -->
+      <div class="space-y-2">
+        <template x-for="task in getFilteredTasks()" :key="task.id">
+          <div class="task-item rounded-lg border p-3"
+               :class="{ 'completed': task.done, 'opacity-60': task.archived }"
+               style="border-color: var(--sn-stylekit-border-color);">
+            <div class="flex items-center gap-3">
+              <button @click.prevent="toggleTask(task)" 
+                      :disabled="locked || task.archived"
+                      class="flex-shrink-0 w-6 h-6 rounded border-2 flex items-center justify-center min-w-[24px] min-h-[24px]"
+                      :style="task.done ? 'background: var(--sn-stylekit-accent-color); border-color: var(--sn-stylekit-accent-color);' : 'border-color: var(--sn-stylekit-border-color);'">
+                <svg x-show="task.done" class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+              </button>
+              
+              <div class="flex-shrink-0 w-1.5 rounded-full shadow-sm" 
+                   style="min-height: 2.5rem;"
+                   :class="'weight-' + task.weight"></div>
+              
+              <div class="flex-1 min-w-0">
+                <div class="break-words"
+                     :class="{ 'line-through opacity-60': task.done }"
+                     x-text="task.text"></div>
+                <div x-show="task.notes" class="text-xs opacity-60 mt-1 truncate" x-text="task.notes"></div>
+              </div>
+              
+              <div x-show="task.archived" class="flex-shrink-0 text-xs px-2 py-1 rounded bg-gray-500 text-white">Archived</div>
+              
+              <div x-show="task.dueDate && !task.done && !task.archived" 
+                   class="flex-shrink-0 text-xs px-2 py-1 rounded"
+                   :class="getDueDateClass(task.dueDate)"
+                   x-text="getDueDateText(task.dueDate)"></div>
+              
+              <div x-show="!task.done && !task.archived && (task.status || defaultStatus) !== 'backlog'"
+                   class="flex-shrink-0 text-xs px-2 py-1 rounded text-white"
+                   :style="'background: ' + getStatusColor(task.status || defaultStatus)"
+                   x-text="getStatusLabel(task.status || defaultStatus)"></div>
+              
+              <div x-show="task.quadrant"
+                   class="flex-shrink-0 text-xs px-2 py-1 rounded text-white"
+                   :style="'background: ' + getQuadrantColor(task.quadrant)"
+                   x-text="getQuadrantLabel(task.quadrant)"></div>
+              
+              <template x-for="tag in (task.tags || []).slice(0, 2)" :key="tag">
+                <span class="flex-shrink-0 text-xs px-2 py-0.5 rounded"
+                      style="background: var(--sn-stylekit-contrast-background-color);"
+                      x-text="tag"></span>
+              </template>
+              
+              <!-- Restore button for archived tasks -->
+              <button x-show="task.archived" @click.prevent="restoreTask(task)" :disabled="locked"
+                      class="flex-shrink-0 px-2 py-1 rounded text-xs min-h-[28px]"
+                      style="background: var(--sn-stylekit-accent-color); color: white;">
+                Restore
+              </button>
+              <button x-show="task.archived" @click.prevent="permanentlyDeleteTask(task)" :disabled="locked"
+                      class="flex-shrink-0 px-2 py-1 rounded text-xs min-h-[28px]"
+                      style="background: #ef4444; color: white;">
+                Delete
+              </button>
+            </div>
+          </div>
+        </template>
+        
+        <div x-show="getFilteredTasks().length === 0" class="text-center py-12 opacity-60">
+          <p>No tasks match your filters</p>
+        </div>
+      </div>
+    </main>
+    
+    <!-- Analytics view -->
+    <main x-show="viewMode === 'analytics'" class="flex-1 overflow-y-auto custom-scroll px-4 py-3">
+      <!-- Period selector -->
+      <div class="flex items-center gap-3 mb-6 flex-wrap">
+        <span class="text-sm opacity-60">Period:</span>
+        <div class="flex rounded-lg overflow-hidden border" style="border-color: var(--sn-stylekit-border-color);">
+          <button @click.prevent="analyticsPeriod = 'week'" 
+                  class="px-3 py-2 text-sm transition-colors"
+                  :style="analyticsPeriod === 'week' ? 'background: var(--sn-stylekit-accent-color); color: white;' : 'background: var(--sn-stylekit-contrast-background-color);'">
+            Week
+          </button>
+          <button @click.prevent="analyticsPeriod = 'month'" 
+                  class="px-3 py-2 text-sm transition-colors"
+                  :style="analyticsPeriod === 'month' ? 'background: var(--sn-stylekit-accent-color); color: white;' : 'background: var(--sn-stylekit-contrast-background-color);'">
+            Month
+          </button>
+          <button @click.prevent="analyticsPeriod = 'custom'" 
+                  class="px-3 py-2 text-sm transition-colors"
+                  :style="analyticsPeriod === 'custom' ? 'background: var(--sn-stylekit-accent-color); color: white;' : 'background: var(--sn-stylekit-contrast-background-color);'">
+            Custom
+          </button>
+        </div>
+        
+        <!-- Custom date range inputs -->
+        <div x-show="analyticsPeriod === 'custom'" class="flex items-center gap-2">
+          <input type="date" 
+                 x-model="analyticsStartDate"
+                 class="px-2 py-1 rounded border text-sm min-h-[32px]"
+                 style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+          <span class="text-sm opacity-60">to</span>
+          <input type="date" 
+                 x-model="analyticsEndDate"
+                 class="px-2 py-1 rounded border text-sm min-h-[32px]"
+                 style="background: var(--sn-stylekit-background-color); border-color: var(--sn-stylekit-border-color); color: var(--sn-stylekit-foreground-color);">
+        </div>
+      </div>
+      
+      <!-- Stats cards -->
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+        <!-- Time tracked -->
+        <div class="p-4 rounded-lg border" style="border-color: var(--sn-stylekit-border-color); background: var(--sn-stylekit-contrast-background-color);">
+          <div class="text-xs opacity-60 mb-1">Time Tracked (<span x-text="analyticsPeriod === 'week' ? 'Week' : (analyticsPeriod === 'month' ? 'Month' : 'Custom')"></span>)</div>
+          <div class="text-2xl font-bold" style="color: var(--sn-stylekit-accent-color);" x-text="(timerTick, getTimeTrackedPeriod())"></div>
+        </div>
+        
+        <!-- Completion rate -->
+        <div class="p-4 rounded-lg border" style="border-color: var(--sn-stylekit-border-color); background: var(--sn-stylekit-contrast-background-color);">
+          <div class="text-xs opacity-60 mb-1">Completion Rate</div>
+          <div class="text-2xl font-bold" style="color: var(--sn-stylekit-accent-color);">
+            <span x-text="getCompletionRate().rate"></span>%
+          </div>
+          <div class="text-xs opacity-60">
+            <span x-text="getCompletionRate().completed"></span>/<span x-text="getCompletionRate().created"></span> tasks
+          </div>
+        </div>
+        
+        <!-- Overdue -->
+        <div class="p-4 rounded-lg border" style="border-color: var(--sn-stylekit-border-color); background: var(--sn-stylekit-contrast-background-color);">
+          <div class="text-xs opacity-60 mb-1">Overdue Tasks</div>
+          <div class="text-2xl font-bold" :style="getOverdueCount() > 0 ? 'color: #ef4444;' : 'color: #22c55e;'" x-text="getOverdueCount()"></div>
+        </div>
+        
+        <!-- Blocked -->
+        <div class="p-4 rounded-lg border" style="border-color: var(--sn-stylekit-border-color); background: var(--sn-stylekit-contrast-background-color);">
+          <div class="text-xs opacity-60 mb-1">Blocked Tasks</div>
+          <div class="text-2xl font-bold" :style="getBlockedCount() > 0 ? 'color: #f59e0b;' : 'color: #22c55e;'" x-text="getBlockedCount()"></div>
+          <div x-show="getBlockerResolvedCount() > 0" class="text-xs text-green-600">
+            <span x-text="getBlockerResolvedCount()"></span> blocker(s) resolved
+          </div>
+        </div>
+        
+        <!-- Active tasks -->
+        <div class="p-4 rounded-lg border" style="border-color: var(--sn-stylekit-border-color); background: var(--sn-stylekit-contrast-background-color);">
+          <div class="text-xs opacity-60 mb-1">Active Tasks</div>
+          <div class="text-2xl font-bold" style="color: var(--sn-stylekit-accent-color);" 
+               x-text="items.filter(function(t) { return !t.done && !t.archived; }).length"></div>
+        </div>
+      </div>
+      
+      <!-- Tasks by Status (horizontal bar chart) -->
+      <div class="mb-6 p-4 rounded-lg border" style="border-color: var(--sn-stylekit-border-color); background: var(--sn-stylekit-contrast-background-color);">
+        <div class="text-sm font-medium mb-4">Tasks by Status</div>
+        <div class="space-y-2">
+          <template x-for="status in statuses" :key="status.id">
+            <div class="flex items-center gap-3">
+              <div class="w-24 text-xs truncate" x-text="status.label"></div>
+              <div class="flex-1 h-6 rounded overflow-hidden" style="background: var(--sn-stylekit-background-color);">
+                <div class="h-full rounded transition-all duration-300"
+                     :style="'width: ' + (getTasksByStatusCounts()[status.id] / Math.max.apply(Math, Object.values(getTasksByStatusCounts()).concat([1])) * 100) + '%; background: ' + status.color"></div>
+              </div>
+              <div class="w-8 text-xs text-right" x-text="getTasksByStatusCounts()[status.id]"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+      
+      <!-- Tasks by Quadrant -->
+      <div class="mb-6 p-4 rounded-lg border" style="border-color: var(--sn-stylekit-border-color); background: var(--sn-stylekit-contrast-background-color);">
+        <div class="text-sm font-medium mb-4">Active Tasks by Quadrant</div>
+        <div class="grid grid-cols-2 gap-4">
+          <template x-for="quad in quadrants" :key="quad.id">
+            <div class="flex items-center gap-3 p-3 rounded" :style="'background: ' + quad.color + '15; border-left: 4px solid ' + quad.color">
+              <div class="flex-1">
+                <div class="text-sm font-medium" x-text="quad.label"></div>
+                <div class="text-xs opacity-60" x-text="quad.subtitle"></div>
+              </div>
+              <div class="text-2xl font-bold" :style="'color: ' + quad.color" x-text="getTasksByQuadrantCounts()[quad.id]"></div>
+            </div>
+          </template>
+        </div>
+        <div class="mt-3 flex items-center gap-3 p-3 rounded" style="background: var(--sn-stylekit-background-color);">
+          <div class="flex-1">
+            <div class="text-sm font-medium">Unassigned</div>
+            <div class="text-xs opacity-60">No quadrant set</div>
+          </div>
+          <div class="text-2xl font-bold opacity-60" x-text="getTasksByQuadrantCounts().unassigned"></div>
+        </div>
+      </div>
+      
+      <!-- Daily completions calendar heatmap -->
+      <div class="p-4 rounded-lg border" style="border-color: var(--sn-stylekit-border-color); background: var(--sn-stylekit-contrast-background-color);">
+        <div class="flex items-center justify-between mb-4">
+          <div class="text-sm font-medium">Completions Calendar</div>
+          <div class="flex items-center gap-2 text-xs opacity-60">
+            <span>Less</span>
+            <div class="flex gap-1">
+              <div class="w-8 h-8 rounded" style="background: var(--sn-stylekit-border-color);"></div>
+              <div class="w-8 h-8 rounded" style="background: var(--sn-stylekit-accent-color); opacity: 0.3;"></div>
+              <div class="w-8 h-8 rounded" style="background: var(--sn-stylekit-accent-color); opacity: 0.6;"></div>
+              <div class="w-8 h-8 rounded" style="background: var(--sn-stylekit-accent-color);"></div>
+            </div>
+            <span>More</span>
+          </div>
+        </div>
+        
+        <div class="overflow-x-auto">
+          <!-- Month labels row -->
+          <div class="flex gap-2 mb-2" style="margin-left: 52px;">
+            <template x-for="(week, weekIndex) in getCalendarHeatmapData()" :key="'month-' + weekIndex">
+              <div class="text-xs opacity-60 font-medium" style="min-width: 48px; width: 48px;">
+                <span x-text="week.monthLabel || ''"></span>
+              </div>
+            </template>
+          </div>
+          
+          <!-- Calendar grid with day labels -->
+          <div class="flex flex-col gap-2">
+            <template x-for="(dayName, dayIndex) in ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']" :key="dayName">
+              <div class="flex gap-2 items-center">
+                <!-- Day label -->
+                <div class="text-xs opacity-60 font-medium" style="width: 36px; text-align: right;" x-text="dayName"></div>
+                <!-- Day cells for each week -->
+                <template x-for="(week, weekIndex) in getCalendarHeatmapData()" :key="'cell-' + dayIndex + '-' + weekIndex">
+                  <div class="rounded flex items-center justify-center text-sm font-bold cursor-default"
+                       style="width: 48px; height: 48px;"
+                       :style="week.days[dayIndex].count === 0 
+                         ? 'background: var(--sn-stylekit-border-color); opacity: 0.4;' 
+                         : 'background: var(--sn-stylekit-accent-color); opacity: ' + (0.35 + (week.days[dayIndex].count / getMaxCalendarCompletion()) * 0.65) + '; color: white;'"
+                       :title="week.days[dayIndex].date"
+                       x-text="week.days[dayIndex].count > 0 ? week.days[dayIndex].count : ''">
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </div>
+        
+        <!-- Summary -->
+        <div class="mt-4 text-sm opacity-60">
+          <span x-text="getTotalCompletionsInPeriod()"></span> task(s) completed in this period
+        </div>
+      </div>
+    </main>
   </div>
 
   <script>
@@ -879,6 +1562,8 @@
         inStandardNotes: false,
         sortBy: 'weight',
         viewMode: 'list',
+        calendarViewMode: 'month',
+        calendarDate: dayjs().format('YYYY-MM-DD'),
         statuses: STATUSES,
         quadrants: QUADRANTS,
         defaultStatus: DEFAULT_STATUS,
@@ -889,6 +1574,26 @@
         expandedTaskId: null,
         timerTick: 0,
         timerInterval: null,
+        
+        // New features state
+        showArchived: '',
+        newTagText: '',
+        
+        // Search & Filter state
+        searchQuery: '',
+        filterStatus: '',
+        filterQuadrant: '',
+        filterHasDueDate: '',
+        filterBlocked: '',
+        filterTag: '',
+        
+        // Analytics period
+        analyticsPeriod: 'week',
+        analyticsStartDate: '',
+        analyticsEndDate: '',
+        
+        // Sort order control - prevents auto-sort on weight change
+        sortedTaskIds: [],
         
         init() {
           var self = this;
@@ -917,6 +1622,8 @@
                 } else {
                   self.items = [];
                 }
+                
+                self.updateSortOrder();
                 
                 try {
                   self.locked = snApi.locked || false;
@@ -954,6 +1661,7 @@
               }
             }
           } catch (e) {}
+          this.updateSortOrder();
         },
         
         saveToStorage() {
@@ -975,18 +1683,24 @@
         },
         
         getPreview() {
-          var incomplete = this.items.filter(function(t) { return !t.done; });
-          if (incomplete.length === 0) return this.items.length > 0 ? 'All tasks completed!' : 'No tasks';
+          var active = this.items.filter(function(t) { return !t.archived; });
+          var incomplete = active.filter(function(t) { return !t.done; });
+          var archived = this.items.filter(function(t) { return t.archived; }).length;
+          if (incomplete.length === 0) {
+            var msg = active.length > 0 ? 'All tasks completed!' : 'No tasks';
+            if (archived > 0) msg += ' (' + archived + ' archived)';
+            return msg;
+          }
           var top = incomplete.slice(0, 3).map(function(t) { return '• ' + t.text; }).join('\n');
           if (incomplete.length > 3) top += '\n... and ' + (incomplete.length - 3) + ' more';
           return top;
         },
         
         toggleDarkMode() { this.darkMode = !this.darkMode; localStorage.setItem('sn-productivity-darkmode', this.darkMode.toString()); },
-        toggleSort() { this.sortBy = this.sortBy === 'weight' ? 'dueDate' : 'weight'; },
+        toggleSort() { this.sortBy = this.sortBy === 'weight' ? 'dueDate' : 'weight'; this.updateSortOrder(); },
         
-        get sortedTasks() {
-          var tasks = [...this.items];
+        updateSortOrder() {
+          var tasks = [...this.items].filter(function(t) { return !t.archived; });
           var self = this;
           var incomplete = tasks.filter(function(t) { return !t.done; });
           var completed = tasks.filter(function(t) { return t.done; });
@@ -1008,13 +1722,43 @@
             if (!b.completedAt) return -1;
             return b.completedAt.localeCompare(a.completedAt);
           });
-          return incomplete.concat(completed);
+          this.sortedTaskIds = incomplete.concat(completed).map(function(t) { return t.id; });
         },
         
-        get completedCount() { return this.items.filter(function(t) { return t.done; }).length; },
+        get sortedTasks() {
+          var self = this;
+          var activeTasks = this.items.filter(function(t) { return !t.archived; });
+          
+          // If no sort order established, calculate it
+          if (this.sortedTaskIds.length === 0) {
+            this.updateSortOrder();
+          }
+          
+          // Build ordered list from sortedTaskIds, adding any new tasks at the end
+          var ordered = [];
+          var idsInOrder = new Set(this.sortedTaskIds);
+          
+          // First, add tasks in the saved order
+          this.sortedTaskIds.forEach(function(id) {
+            var task = activeTasks.find(function(t) { return t.id === id; });
+            if (task) ordered.push(task);
+          });
+          
+          // Then add any tasks not in the order (newly added)
+          activeTasks.forEach(function(t) {
+            if (!idsInOrder.has(t.id)) {
+              ordered.push(t);
+            }
+          });
+          
+          return ordered;
+        },
+        
+        get completedCount() { return this.items.filter(function(t) { return t.done && !t.archived; }).length; },
         get progressText() {
-          var done = this.items.filter(function(t) { return t.done; }).length;
-          return this.items.length === 0 ? '' : done + '/' + this.items.length + ' done';
+          var active = this.items.filter(function(t) { return !t.archived; });
+          var done = active.filter(function(t) { return t.done; }).length;
+          return active.length === 0 ? '' : done + '/' + active.length + ' done';
         },
         
         addTask() {
@@ -1023,10 +1767,13 @@
             id: genUUID(), text: this.newTaskText.trim(), weight: 3, done: false,
             status: this.defaultStatus, subtasks: [], dueDate: null,
             estimatedMinutes: null, trackedSeconds: 0, timerStartedAt: null,
-            createdAt: new Date().toISOString(), completedAt: null
+            createdAt: new Date().toISOString(), completedAt: null,
+            notes: '', tags: [], archived: false,
+            blockedByTaskId: null, blockerNote: ''
           });
           this.newTaskText = '';
           this.save();
+          this.updateSortOrder();
         },
         
         toggleTask(task) {
@@ -1036,12 +1783,13 @@
           if (task.done) { task.status = 'done'; if (task.timerStartedAt) this.stopTimer(task); }
           else if (task.status === 'done') { task.status = this.defaultStatus; }
           this.save();
+          this.updateSortOrder();
         },
         
         deleteTask(task) {
           if (this.locked) return;
           var idx = this.items.findIndex(function(t) { return t.id === task.id; });
-          if (idx !== -1) { this.items.splice(idx, 1); this.expandedTaskId = null; this.save(); }
+          if (idx !== -1) { this.items.splice(idx, 1); this.expandedTaskId = null; this.save(); this.updateSortOrder(); }
         },
         
         startEditTask(task) {
@@ -1061,7 +1809,7 @@
         increaseWeight(task) { if (this.locked || task.weight >= 5) return; task.weight++; this.save(); },
         decreaseWeight(task) { if (this.locked || task.weight <= 1) return; task.weight--; this.save(); },
         toggleExpanded(task) { this.expandedTaskId = this.expandedTaskId === task.id ? null : task.id; this.newSubtaskText = ''; },
-        clearCompleted() { if (this.locked) return; this.items = this.items.filter(function(t) { return !t.done; }); this.save(); },
+        clearCompleted() { if (this.locked) return; this.items = this.items.filter(function(t) { return !t.done; }); this.save(); this.updateSortOrder(); },
         
         addSubtask(task) {
           if (!this.newSubtaskText.trim() || this.locked) return;
@@ -1176,7 +1924,7 @@
         
         getTasksByStatus(statusId) {
           var self = this;
-          return this.items.filter(function(t) { return (t.status || self.defaultStatus) === statusId; })
+          return this.items.filter(function(t) { return !t.archived && (t.status || self.defaultStatus) === statusId; })
             .sort(function(a, b) { return b.weight - a.weight; });
         },
         
@@ -1198,12 +1946,17 @@
             task.completedAt = task.completedAt || new Date().toISOString();
             if (task.timerStartedAt) this.stopTimer(task);
           } else { task.done = false; task.completedAt = null; }
+          // Clear blocker fields when changing away from blocked status
+          if (statusId !== 'blocked') {
+            task.blockedByTaskId = null;
+            task.blockerNote = '';
+          }
           this.save();
         },
         
         getColumnCount(statusId) {
           var self = this;
-          return this.items.filter(function(t) { return (t.status || self.defaultStatus) === statusId; }).length;
+          return this.items.filter(function(t) { return !t.archived && (t.status || self.defaultStatus) === statusId; }).length;
         },
         
         // Quadrant functions
@@ -1215,12 +1968,12 @@
         
         getTasksByQuadrant(quadrantId) {
           return this.items
-            .filter(function(t) { return t.quadrant === quadrantId && !t.done; })
+            .filter(function(t) { return !t.archived && t.quadrant === quadrantId && !t.done; })
             .sort(function(a, b) { return b.weight - a.weight; });
         },
         
         getQuadrantCount(quadrantId) {
-          return this.items.filter(function(t) { return t.quadrant === quadrantId && !t.done; }).length;
+          return this.items.filter(function(t) { return !t.archived && t.quadrant === quadrantId && !t.done; }).length;
         },
         
         getQuadrantColor(quadrantId) {
@@ -1235,7 +1988,7 @@
         
         getUnassignedTasks() {
           return this.items
-            .filter(function(t) { return !t.quadrant && !t.done; })
+            .filter(function(t) { return !t.archived && !t.quadrant && !t.done; })
             .sort(function(a, b) { return b.weight - a.weight; });
         },
         
@@ -1261,6 +2014,654 @@
           event.preventDefault();
           if (this.draggedTask && !this.locked) this.setTaskStatus(this.draggedTask, statusId);
           this.draggedTask = null;
+        },
+        
+        // Calendar functions
+        calendarTitle() {
+          var d = dayjs(this.calendarDate);
+          if (this.calendarViewMode === 'month') {
+            return d.format('MMMM YYYY');
+          } else {
+            var start = d.startOf('week');
+            var end = d.endOf('week');
+            if (start.month() === end.month()) {
+              return start.format('MMM D') + ' - ' + end.format('D, YYYY');
+            } else {
+              return start.format('MMM D') + ' - ' + end.format('MMM D, YYYY');
+            }
+          }
+        },
+        
+        calendarPrev() {
+          var d = dayjs(this.calendarDate);
+          if (this.calendarViewMode === 'month') {
+            this.calendarDate = d.subtract(1, 'month').format('YYYY-MM-DD');
+          } else {
+            this.calendarDate = d.subtract(1, 'week').format('YYYY-MM-DD');
+          }
+        },
+        
+        calendarNext() {
+          var d = dayjs(this.calendarDate);
+          if (this.calendarViewMode === 'month') {
+            this.calendarDate = d.add(1, 'month').format('YYYY-MM-DD');
+          } else {
+            this.calendarDate = d.add(1, 'week').format('YYYY-MM-DD');
+          }
+        },
+        
+        calendarToday() {
+          this.calendarDate = dayjs().format('YYYY-MM-DD');
+        },
+        
+        getMonthDays() {
+          var d = dayjs(this.calendarDate);
+          var startOfMonth = d.startOf('month');
+          var endOfMonth = d.endOf('month');
+          var startOfCalendar = startOfMonth.startOf('week');
+          var endOfCalendar = endOfMonth.endOf('week');
+          
+          var days = [];
+          var current = startOfCalendar;
+          var today = dayjs().format('YYYY-MM-DD');
+          
+          while (current.isBefore(endOfCalendar) || current.isSame(endOfCalendar, 'day')) {
+            days.push({
+              date: current.format('YYYY-MM-DD'),
+              dayNum: current.date(),
+              isCurrentMonth: current.month() === d.month(),
+              isToday: current.format('YYYY-MM-DD') === today
+            });
+            current = current.add(1, 'day');
+          }
+          return days;
+        },
+        
+        getWeekDays() {
+          var d = dayjs(this.calendarDate);
+          var startOfWeek = d.startOf('week');
+          var days = [];
+          var today = dayjs().format('YYYY-MM-DD');
+          
+          for (var i = 0; i < 7; i++) {
+            var day = startOfWeek.add(i, 'day');
+            days.push({
+              date: day.format('YYYY-MM-DD'),
+              dayNum: day.date(),
+              dayName: day.format('ddd'),
+              isToday: day.format('YYYY-MM-DD') === today
+            });
+          }
+          return days;
+        },
+        
+        getTasksForDate(date) {
+          return this.items.filter(function(t) { return !t.archived && t.dueDate === date; })
+            .sort(function(a, b) { return b.weight - a.weight; });
+        },
+        
+        getTasksWithoutDueDate() {
+          return this.items.filter(function(t) { return !t.archived && !t.dueDate && !t.done; })
+            .sort(function(a, b) { return b.weight - a.weight; });
+        },
+        
+        onDropCalendar(event, date) {
+          event.preventDefault();
+          if (this.draggedTask && !this.locked) {
+            this.draggedTask.dueDate = date;
+            this.save();
+          }
+          this.draggedTask = null;
+        },
+        
+        // Tag functions
+        addTag(task) {
+          if (this.locked || !this.newTagText.trim()) return;
+          if (!task.tags) task.tags = [];
+          var tag = this.newTagText.trim().toLowerCase();
+          if (!task.tags.includes(tag)) {
+            task.tags.push(tag);
+            this.save();
+          }
+          this.newTagText = '';
+        },
+        
+        removeTag(task, index) {
+          if (this.locked) return;
+          task.tags.splice(index, 1);
+          this.save();
+        },
+        
+        getAllTags() {
+          var tags = {};
+          this.items.forEach(function(task) {
+            (task.tags || []).forEach(function(tag) {
+              tags[tag] = (tags[tag] || 0) + 1;
+            });
+          });
+          return Object.keys(tags).sort();
+        },
+        
+        // Blocker helper functions
+        getTaskById(id) {
+          if (!id) return null;
+          return this.items.find(function(t) { return t.id === id; }) || null;
+        },
+        
+        getBlockerTaskOptions(currentTaskId) {
+          return this.items.filter(function(t) {
+            return t.id !== currentTaskId && !t.archived;
+          }).sort(function(a, b) {
+            // Sort incomplete first, then by text
+            if (a.done !== b.done) return a.done ? 1 : -1;
+            return a.text.localeCompare(b.text);
+          });
+        },
+        
+        // Archive functions
+        archiveCompleted() {
+          if (this.locked) return;
+          var self = this;
+          this.items.forEach(function(task) {
+            if (task.done && !task.archived) {
+              task.archived = true;
+              task.archivedAt = new Date().toISOString();
+            }
+          });
+          this.save();
+          this.updateSortOrder();
+        },
+        
+        getArchivedTasks() {
+          return this.items.filter(function(t) { return t.archived; })
+            .sort(function(a, b) {
+              if (!a.archivedAt && !b.archivedAt) return 0;
+              if (!a.archivedAt) return 1;
+              if (!b.archivedAt) return -1;
+              return b.archivedAt.localeCompare(a.archivedAt);
+            });
+        },
+        
+        restoreTask(task) {
+          if (this.locked) return;
+          task.archived = false;
+          task.archivedAt = null;
+          this.save();
+          this.updateSortOrder();
+        },
+        
+        permanentlyDeleteTask(task) {
+          if (this.locked) return;
+          var idx = this.items.findIndex(function(t) { return t.id === task.id; });
+          if (idx !== -1) { this.items.splice(idx, 1); this.save(); this.updateSortOrder(); }
+        },
+        
+        // Search & Filter functions
+        getFilteredTasks() {
+          var self = this;
+          var query = this.searchQuery.toLowerCase().trim();
+          
+          return this.items.filter(function(t) {
+            // Archived filter: '' = active only, 'include' = all, 'only' = archived only
+            if (self.showArchived === '') {
+              if (t.archived) return false;
+            } else if (self.showArchived === 'only') {
+              if (!t.archived) return false;
+            }
+            // 'include' shows all
+            
+            // Text search
+            if (query) {
+              var matchText = (t.text || '').toLowerCase().includes(query);
+              var matchNotes = (t.notes || '').toLowerCase().includes(query);
+              var matchTags = (t.tags || []).some(function(tag) { return tag.toLowerCase().includes(query); });
+              var matchBlockerNote = (t.blockerNote || '').toLowerCase().includes(query);
+              if (!matchText && !matchNotes && !matchTags && !matchBlockerNote) return false;
+            }
+            
+            // Status filter
+            if (self.filterStatus && (t.status || self.defaultStatus) !== self.filterStatus) return false;
+            
+            // Quadrant filter
+            if (self.filterQuadrant) {
+              if (self.filterQuadrant === 'none' && t.quadrant) return false;
+              if (self.filterQuadrant !== 'none' && t.quadrant !== self.filterQuadrant) return false;
+            }
+            
+            // Due date filter
+            if (self.filterHasDueDate === 'yes' && !t.dueDate) return false;
+            if (self.filterHasDueDate === 'no' && t.dueDate) return false;
+            if (self.filterHasDueDate === 'overdue') {
+              if (!t.dueDate) return false;
+              if (!dayjs(t.dueDate).isBefore(dayjs().startOf('day'))) return false;
+            }
+            
+            // Blocked filter
+            if (self.filterBlocked === 'blocked' && t.status !== 'blocked') return false;
+            if (self.filterBlocked === 'hasBlocker' && !t.blockedByTaskId && !t.blockerNote) return false;
+            if (self.filterBlocked === 'blockerResolved') {
+              if (!t.blockedByTaskId) return false;
+              var blockerTask = self.getTaskById(t.blockedByTaskId);
+              if (!blockerTask || !blockerTask.done) return false;
+            }
+            
+            // Tag filter
+            if (self.filterTag && !(t.tags || []).includes(self.filterTag)) return false;
+            
+            return true;
+          }).sort(function(a, b) { return b.weight - a.weight; });
+        },
+        
+        clearFilters() {
+          this.searchQuery = '';
+          this.filterStatus = '';
+          this.filterQuadrant = '';
+          this.filterHasDueDate = '';
+          this.filterBlocked = '';
+          this.filterTag = '';
+          this.showArchived = '';
+        },
+        
+        // Export CSV function
+        exportCSV() {
+          var tasks = this.viewMode === 'search' ? this.getFilteredTasks() : this.items;
+          var headers = ['Title', 'Status', 'Quadrant', 'Due Date', 'Tags', 'Time Tracked', 'Estimate', 'Created', 'Completed', 'Archived', 'Blocked By', 'Blocker Note', 'Notes'];
+          var self = this;
+          
+          var rows = tasks.map(function(t) {
+            var blockedByTask = t.blockedByTaskId ? self.getTaskById(t.blockedByTaskId) : null;
+            return [
+              '"' + (t.text || '').replace(/"/g, '""') + '"',
+              self.getStatusLabel(t.status || self.defaultStatus),
+              t.quadrant ? self.getQuadrantLabel(t.quadrant) : '',
+              t.dueDate || '',
+              '"' + (t.tags || []).join(', ') + '"',
+              self.formatTrackedTime(t),
+              self.formatEstimate(t),
+              t.createdAt ? dayjs(t.createdAt).format('YYYY-MM-DD HH:mm') : '',
+              t.completedAt ? dayjs(t.completedAt).format('YYYY-MM-DD HH:mm') : '',
+              t.archived ? 'Yes' : 'No',
+              blockedByTask ? '"' + blockedByTask.text.replace(/"/g, '""') + '"' : '',
+              '"' + (t.blockerNote || '').replace(/"/g, '""').replace(/\n/g, ' ') + '"',
+              '"' + (t.notes || '').replace(/"/g, '""').replace(/\n/g, ' ') + '"'
+            ].join(',');
+          });
+          
+          var csv = headers.join(',') + '\n' + rows.join('\n');
+          var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+          var link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = 'tasks-' + dayjs().format('YYYY-MM-DD') + '.csv';
+          link.click();
+          URL.revokeObjectURL(link.href);
+        },
+        
+        // Import CSV function
+        importCSV(event) {
+          var self = this;
+          var file = event.target.files[0];
+          if (!file) return;
+          
+          var reader = new FileReader();
+          reader.onload = function(e) {
+            try {
+              var text = e.target.result;
+              var lines = text.split('\n').filter(function(line) { return line.trim(); });
+              
+              if (lines.length < 2) {
+                alert('CSV file is empty or has no data rows.');
+                return;
+              }
+              
+              // Parse header to find column indices
+              var headers = self.parseCSVLine(lines[0]);
+              var headerMap = {};
+              headers.forEach(function(h, i) { headerMap[h.toLowerCase().trim()] = i; });
+              
+              // Required column
+              if (headerMap['title'] === undefined) {
+                alert('CSV must have a "Title" column.');
+                return;
+              }
+              
+              var imported = [];
+              var statusMap = {};
+              self.statuses.forEach(function(s) { statusMap[s.label.toLowerCase()] = s.id; });
+              var quadrantMap = {};
+              self.quadrants.forEach(function(q) { quadrantMap[q.label.toLowerCase()] = q.id; });
+              
+              for (var i = 1; i < lines.length; i++) {
+                var cols = self.parseCSVLine(lines[i]);
+                var title = self.getCSVValue(cols, headerMap, 'title');
+                if (!title) continue;
+                
+                var statusLabel = self.getCSVValue(cols, headerMap, 'status');
+                var quadrantLabel = self.getCSVValue(cols, headerMap, 'quadrant');
+                var tagsStr = self.getCSVValue(cols, headerMap, 'tags');
+                var archived = self.getCSVValue(cols, headerMap, 'archived');
+                var estimate = self.getCSVValue(cols, headerMap, 'estimate');
+                
+                var task = {
+                  id: genUUID(),
+                  text: title,
+                  weight: 3,
+                  done: statusLabel && statusLabel.toLowerCase() === 'done',
+                  status: statusMap[statusLabel ? statusLabel.toLowerCase() : ''] || self.defaultStatus,
+                  quadrant: quadrantMap[quadrantLabel ? quadrantLabel.toLowerCase() : ''] || null,
+                  subtasks: [],
+                  dueDate: self.getCSVValue(cols, headerMap, 'due date') || null,
+                  estimatedMinutes: estimate ? self.parseTimeInput(estimate) : null,
+                  trackedSeconds: self.parseTrackedTime(self.getCSVValue(cols, headerMap, 'time tracked')),
+                  timerStartedAt: null,
+                  createdAt: self.getCSVValue(cols, headerMap, 'created') || new Date().toISOString(),
+                  completedAt: self.getCSVValue(cols, headerMap, 'completed') || null,
+                  notes: self.getCSVValue(cols, headerMap, 'notes') || '',
+                  tags: tagsStr ? tagsStr.split(',').map(function(t) { return t.trim().toLowerCase(); }).filter(function(t) { return t; }) : [],
+                  archived: archived && archived.toLowerCase() === 'yes',
+                  blockedByTaskId: null,
+                  blockerNote: self.getCSVValue(cols, headerMap, 'blocker note') || ''
+                };
+                
+                if (task.done && !task.completedAt) {
+                  task.completedAt = new Date().toISOString();
+                }
+                
+                imported.push(task);
+              }
+              
+              if (imported.length === 0) {
+                alert('No valid tasks found in CSV.');
+                return;
+              }
+              
+              // Ask user how to handle import
+              var action = confirm(
+                'Found ' + imported.length + ' task(s) to import.\n\n' +
+                'OK = Add to existing tasks\n' +
+                'Cancel = Replace all tasks'
+              );
+              
+              if (action) {
+                // Add to existing
+                self.items = self.items.concat(imported);
+              } else {
+                // Replace all
+                self.items = imported;
+              }
+              
+              self.save();
+              self.updateSortOrder();
+              alert('Successfully imported ' + imported.length + ' task(s).');
+              
+            } catch (err) {
+              console.error('Import error:', err);
+              alert('Failed to import CSV: ' + err.message);
+            }
+          };
+          
+          reader.readAsText(file);
+          event.target.value = ''; // Reset file input
+        },
+        
+        parseCSVLine(line) {
+          var result = [];
+          var current = '';
+          var inQuotes = false;
+          
+          for (var i = 0; i < line.length; i++) {
+            var char = line[i];
+            if (char === '"') {
+              if (inQuotes && line[i + 1] === '"') {
+                current += '"';
+                i++;
+              } else {
+                inQuotes = !inQuotes;
+              }
+            } else if (char === ',' && !inQuotes) {
+              result.push(current);
+              current = '';
+            } else {
+              current += char;
+            }
+          }
+          result.push(current);
+          return result;
+        },
+        
+        getCSVValue(cols, headerMap, columnName) {
+          var idx = headerMap[columnName.toLowerCase()];
+          if (idx === undefined || idx >= cols.length) return '';
+          return cols[idx].trim();
+        },
+        
+        parseTrackedTime(str) {
+          if (!str) return 0;
+          // Parse formats like "1:23:45" or "23:45"
+          var parts = str.split(':').map(function(p) { return parseInt(p) || 0; });
+          if (parts.length === 3) {
+            return parts[0] * 3600 + parts[1] * 60 + parts[2];
+          } else if (parts.length === 2) {
+            return parts[0] * 60 + parts[1];
+          }
+          return 0;
+        },
+        
+        // Analytics functions
+        getTasksByStatusCounts() {
+          var self = this;
+          var counts = {};
+          this.statuses.forEach(function(s) { counts[s.id] = 0; });
+          this.items.filter(function(t) { return !t.archived; }).forEach(function(t) {
+            var status = t.status || self.defaultStatus;
+            counts[status] = (counts[status] || 0) + 1;
+          });
+          return counts;
+        },
+        
+        getTasksByQuadrantCounts() {
+          var counts = { q1: 0, q2: 0, q3: 0, q4: 0, unassigned: 0 };
+          this.items.filter(function(t) { return !t.archived && !t.done; }).forEach(function(t) {
+            if (t.quadrant) { counts[t.quadrant]++; }
+            else { counts.unassigned++; }
+          });
+          return counts;
+        },
+        
+        getTimeTrackedPeriod() {
+          var self = this;
+          var now = dayjs();
+          var start, end;
+          
+          if (this.analyticsPeriod === 'custom') {
+            start = this.analyticsStartDate ? dayjs(this.analyticsStartDate).startOf('day') : now.subtract(1, 'week');
+            end = this.analyticsEndDate ? dayjs(this.analyticsEndDate).endOf('day') : now;
+          } else if (this.analyticsPeriod === 'week') {
+            start = now.startOf('week');
+            end = now;
+          } else {
+            start = now.startOf('month');
+            end = now;
+          }
+          
+          var total = 0;
+          this.items.forEach(function(t) {
+            var tracked = t.trackedSeconds || 0;
+            // Add running time if timer is active
+            if (t.timerStartedAt) {
+              tracked += Math.floor((new Date() - new Date(t.timerStartedAt)) / 1000);
+            }
+            // Only count if task was completed in period or is still active
+            if (t.completedAt) {
+              var completedDate = dayjs(t.completedAt);
+              if (completedDate.isAfter(start) && completedDate.isBefore(end.add(1, 'day'))) {
+                total += tracked;
+              }
+            } else {
+              // For active tasks, count all tracked time
+              total += tracked;
+            }
+          });
+          
+          var hours = Math.floor(total / 3600);
+          var mins = Math.floor((total % 3600) / 60);
+          return hours + 'h ' + mins + 'm';
+        },
+        
+        getCompletionRate() {
+          var now = dayjs();
+          var start, end;
+          
+          if (this.analyticsPeriod === 'custom') {
+            start = this.analyticsStartDate ? dayjs(this.analyticsStartDate).startOf('day') : now.subtract(1, 'week');
+            end = this.analyticsEndDate ? dayjs(this.analyticsEndDate).endOf('day') : now;
+          } else if (this.analyticsPeriod === 'week') {
+            start = now.subtract(1, 'week');
+            end = now;
+          } else {
+            start = now.subtract(1, 'month');
+            end = now;
+          }
+          
+          var created = this.items.filter(function(t) {
+            if (!t.createdAt) return false;
+            var createdDate = dayjs(t.createdAt);
+            return createdDate.isAfter(start) && createdDate.isBefore(end.add(1, 'day'));
+          }).length;
+          
+          var completed = this.items.filter(function(t) {
+            if (!t.completedAt) return false;
+            var completedDate = dayjs(t.completedAt);
+            return completedDate.isAfter(start) && completedDate.isBefore(end.add(1, 'day'));
+          }).length;
+          
+          if (created === 0) return { rate: 0, created: 0, completed: completed };
+          return { rate: Math.round((completed / created) * 100), created: created, completed: completed };
+        },
+        
+        getOverdueCount() {
+          var today = dayjs().startOf('day');
+          return this.items.filter(function(t) {
+            return !t.done && !t.archived && t.dueDate && dayjs(t.dueDate).isBefore(today);
+          }).length;
+        },
+        
+        getBlockedCount() {
+          return this.items.filter(function(t) {
+            return !t.done && !t.archived && t.status === 'blocked';
+          }).length;
+        },
+        
+        getBlockerResolvedCount() {
+          var self = this;
+          return this.items.filter(function(t) {
+            if (t.done || t.archived || t.status !== 'blocked') return false;
+            if (!t.blockedByTaskId) return false;
+            var blockerTask = self.getTaskById(t.blockedByTaskId);
+            return blockerTask && blockerTask.done;
+          }).length;
+        },
+        
+        getCalendarHeatmapData() {
+          var now = dayjs();
+          var start, end;
+          
+          if (this.analyticsPeriod === 'custom' && this.analyticsStartDate && this.analyticsEndDate) {
+            start = dayjs(this.analyticsStartDate);
+            end = dayjs(this.analyticsEndDate);
+          } else if (this.analyticsPeriod === 'week') {
+            start = now.subtract(6, 'day');
+            end = now;
+          } else {
+            start = now.subtract(29, 'day');
+            end = now;
+          }
+          
+          // Extend start to beginning of its week (Sunday)
+          var calStart = start.startOf('week');
+          // Extend end to end of its week (Saturday)
+          var calEnd = end.endOf('week');
+          
+          // Build completion count map
+          var completionMap = {};
+          var self = this;
+          this.items.forEach(function(t) {
+            if (t.completedAt) {
+              var dateStr = dayjs(t.completedAt).format('YYYY-MM-DD');
+              completionMap[dateStr] = (completionMap[dateStr] || 0) + 1;
+            }
+          });
+          
+          // Build weeks array
+          var weeks = [];
+          var currentDay = calStart;
+          var currentWeek = null;
+          var lastMonth = -1;
+          
+          while (currentDay.isBefore(calEnd) || currentDay.isSame(calEnd, 'day')) {
+            var dayOfWeek = currentDay.day(); // 0 = Sunday
+            
+            if (dayOfWeek === 0) {
+              // Start new week
+              currentWeek = { 
+                monthLabel: '', 
+                days: [] 
+              };
+              weeks.push(currentWeek);
+              
+              // Add month label if this is a new month
+              var thisMonth = currentDay.month();
+              if (thisMonth !== lastMonth) {
+                currentWeek.monthLabel = currentDay.format('MMM');
+                lastMonth = thisMonth;
+              }
+            }
+            
+            var dateStr = currentDay.format('YYYY-MM-DD');
+            var isInRange = (currentDay.isAfter(start.subtract(1, 'day')) && currentDay.isBefore(end.add(1, 'day')));
+            
+            currentWeek.days.push({
+              date: dateStr,
+              count: isInRange ? (completionMap[dateStr] || 0) : 0,
+              inRange: isInRange
+            });
+            
+            currentDay = currentDay.add(1, 'day');
+          }
+          
+          return weeks;
+        },
+        
+        getMaxCalendarCompletion() {
+          var max = 1;
+          var data = this.getCalendarHeatmapData();
+          data.forEach(function(week) {
+            week.days.forEach(function(day) {
+              if (day.count > max) max = day.count;
+            });
+          });
+          return max;
+        },
+        
+        getTotalCompletionsInPeriod() {
+          var now = dayjs();
+          var start, end;
+          
+          if (this.analyticsPeriod === 'custom' && this.analyticsStartDate && this.analyticsEndDate) {
+            start = dayjs(this.analyticsStartDate).startOf('day');
+            end = dayjs(this.analyticsEndDate).endOf('day');
+          } else if (this.analyticsPeriod === 'week') {
+            start = now.subtract(6, 'day').startOf('day');
+            end = now.endOf('day');
+          } else {
+            start = now.subtract(29, 'day').startOf('day');
+            end = now.endOf('day');
+          }
+          
+          return this.items.filter(function(t) {
+            if (!t.completedAt) return false;
+            var completed = dayjs(t.completedAt);
+            return completed.isAfter(start.subtract(1, 'second')) && completed.isBefore(end.add(1, 'second'));
+          }).length;
         }
       };
     }
